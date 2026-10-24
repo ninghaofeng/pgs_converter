@@ -14,7 +14,7 @@ function Assert-Throws {
     Assert ($null -ne $message -and $message -like $Pattern) "Expected error matching '$Pattern', got '$message'."
 }
 
-foreach ($name in @("build-windows.ps1", "bundle-windows.ps1", "test-build-windows.ps1")) {
+foreach ($name in @("build-windows.ps1", "bundle-windows.ps1", "windows-static.ps1", "test-build-windows.ps1")) {
     $tokens = $null
     $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseFile("$PSScriptRoot/$name", [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -22,6 +22,28 @@ foreach ($name in @("build-windows.ps1", "bundle-windows.ps1", "test-build-windo
 }
 
 . "$PSScriptRoot/build-windows.ps1"
+$pkgConfigPath = "C:\MSYS2 with spaces\ucrt64\bin\pkg-config.exe"
+$sharedLink = Get-WindowsLinkConfiguration $pkgConfigPath
+$staticLink = Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic
+Assert ($sharedLink.PkgConfig -eq '"C:/MSYS2 with spaces/ucrt64/bin/pkg-config.exe"') "pkg-config executable path was not quoted."
+Assert ($sharedLink.LinkerFlags -eq "" -and $sharedLink.BuildTags -eq "") "Shared linking gained static flags."
+Assert ($staticLink.PkgConfig -eq $sharedLink.PkgConfig) "PKG_CONFIG must not contain arguments that Go would discard."
+Assert ($staticLink.BuildTags -eq "pgs_static") "Static cgo directives were not enabled."
+Assert ($staticLink.LinkerFlags -eq "-linkmode=external -extldflags=-static") "Static external linker flags are missing."
+$allowedImports = @(
+    "The Import Tables",
+    "    DLL Name: KERNEL32.dll",
+    "    DLL Name: DWrite.dll",
+    "    DLL Name: ucrtbase.dll",
+    "    DLL Name: api-ms-win-crt-runtime-l1-1-0.dll",
+    "    DLL Name: ext-ms-win-ntuser-window-l1-1-0.dll"
+)
+$audited = @(Assert-WindowsStaticImports $allowedImports)
+Assert ($audited.Count -eq 5) "System imports were not retained in audit output."
+foreach ($dll in @("libass-9.dll", "libfreetype-6.dll", "libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "msvcp140.dll", "unknown.dll", "../kernel32.dll")) {
+    Assert-Throws { Assert-WindowsStaticImports ($allowedImports + "DLL Name: $dll") } "*non-allowlisted DLL*"
+}
+Assert-Throws { Assert-WindowsStaticImports @("not a PE import table") } "*no PE DLL imports*"
 $x64 = Get-TargetConfiguration "X64"
 Assert ($x64.Arch -eq "amd64" -and $x64.Prefix -eq "ucrt64" -and $x64.Compiler -eq "gcc.exe") "Incorrect x64 toolchain."
 $arm = Get-TargetConfiguration "Arm64"
@@ -60,6 +82,26 @@ try {
     $root = Join-Path $temp "MSYS2 with spaces"
     New-Item -ItemType Directory -Path "$root/usr/bin" -Force | Out-Null
     New-Item -ItemType File -Path "$root/usr/bin/bash.exe" | Out-Null
+    $binary = Join-Path $temp "input.exe"
+    New-Item -ItemType File -Path $binary | Out-Null
+    $objdump = Join-Path $temp "mock-objdump.ps1"
+    @'
+param([string]$Mode, [string]$Binary)
+"    DLL Name: libass-9.dll"
+$global:LASTEXITCODE = 0
+'@ | Set-Content -LiteralPath $objdump -Encoding Ascii
+    $rejectedBundle = Join-Path $temp "rejected-static-bundle"
+    Assert-Throws {
+        & "$PSScriptRoot/bundle-windows.ps1" -Binary $binary -Prefix $root -Destination $rejectedBundle -Objdump $objdump -Static
+    } "*non-allowlisted DLL*"
+    Assert (-not (Test-Path -LiteralPath "$rejectedBundle/libass-9.dll")) "Static bundler copied a DLL instead of failing."
+    @'
+param([string]$Mode, [string]$Binary)
+$global:LASTEXITCODE = 7
+'@ | Set-Content -LiteralPath $objdump -Encoding Ascii
+    Assert-Throws {
+        & "$PSScriptRoot/bundle-windows.ps1" -Binary $binary -Prefix $root -Destination "$temp/failed-inspection" -Objdump $objdump -Static
+    } "*Cannot inspect imports*"
     Assert ((Find-Msys2Root $root) -eq [System.IO.Path]::GetFullPath($root)) "MSYS2 paths with spaces must remain intact."
     Assert-Throws { Find-Msys2Root "$root/ucrt64" } "*Invalid MSYS2 root*"
     $hostArch = & go env GOHOSTARCH
@@ -75,5 +117,5 @@ try {
 } finally {
     if (Test-Path -LiteralPath $temp) { Remove-Item -Recurse -LiteralPath $temp }
 }
-Write-Host "PowerShell syntax, architecture selection, MSYS2 discovery and failure propagation passed."
+Write-Host "PowerShell syntax, architecture selection, static-link configuration/import audit, MSYS2 discovery and failure propagation passed."
 exit 0

@@ -27,10 +27,18 @@ Native renderer and common transitive components:
   https://github.com/fribidi/fribidi/blob/master/COPYING
 
 The exact native dependency graph depends on the platform and installed
-packages. Build information is included in generated packages. Shared native
-libraries are retained rather than hiding LGPL components inside a static
-executable. Before release, verify the applicable source/relinking obligations
-and provide corresponding source or a compliant source offer as required.
+packages. Build information is included in generated packages. The default
+build retains shared native libraries. The opt-in Windows -Static build links
+native libraries into the executable and does not bundle font files.
+
+Static development packages are NOT complete redistribution-compliance
+bundles. LGPL components can include FriBidi and, through HarfBuzz, GLib.
+Before redistribution, audit every linked component and provide the applicable
+corresponding sources, notices, and object files or other relinking materials
+and instructions needed to relink with modified LGPL libraries. Preserve
+users' applicable modification/reverse-engineering rights. The build scripts
+collect notices but do not automatically prepare these source/relinking
+materials. This requirement is not removed by shipping only one executable.
 
 FFmpeg is used only for development tests and is not bundled by this project.
 Its own license depends on its build configuration.

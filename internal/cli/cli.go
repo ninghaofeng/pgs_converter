@@ -33,7 +33,9 @@ type job struct {
 
 type completed struct {
 	job
-	result convert.Result
+	result   convert.Result
+	progress *convert.Progress
+	started  bool
 }
 
 func supported(path string) bool {
@@ -138,7 +140,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var opt convert.Options
 	var size, fps, output, outDir, profile string
 	var white float64
-	var recursive bool
+	var recursive, noProgress bool
 	var workers int
 	flags.StringVar(&size, "size", "", "Required output canvas, e.g. 1920x1080")
 	flags.StringVar(&fps, "fps", "", "Required frame rate, e.g. 24 or 24000/1001")
@@ -153,6 +155,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&opt.Overwrite, "overwrite", false, "Replace existing outputs only after successful conversion")
 	flags.BoolVar(&recursive, "recursive", false, "Recursively discover batch subtitles")
 	flags.IntVar(&workers, "jobs", 1, "Concurrent batch conversions (1..32)")
+	flags.BoolVar(&noProgress, "no-progress", false, "Disable live per-file progress (keep results and diagnostics)")
 	flags.StringVar(&profile, "color-profile", "sdr", "sdr or experimental hdr10 (BT.2020/PQ)")
 	flags.Float64Var(&white, "subtitle-white-nits", 203, "HDR reference white (0..10000], default 203 nits")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -257,11 +260,18 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 					if err := ctx.Err(); err != nil {
 						j.err = err
 					} else {
+						fileOpt := opt
+						if !noProgress {
+							results <- completed{job: j, started: true}
+							fileOpt.Progress = func(progress convert.Progress) {
+								results <- completed{job: j, progress: &progress}
+							}
+						}
 						// Each File call owns its libass state and staged output.
-						result, j.err = convert.File(ctx, j.input, j.output, opt)
+						result, j.err = convert.File(ctx, j.input, j.output, fileOpt)
 					}
 				}
-				results <- completed{j, result}
+				results <- completed{job: j, result: result}
 			}
 		}()
 	}
@@ -286,6 +296,19 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// Completion order is intentionally not the original input order.
 	success, failed, warnings := 0, 0, globalWarnings
 	for done := range results {
+		if done.started {
+			fmt.Fprintf(stderr, "START %s -> %s\n", done.input, done.output)
+			continue
+		}
+		if p := done.progress; p != nil {
+			percent := 100 * float64(p.Processed) / float64(p.Total)
+			if p.Processed < p.Total {
+				percent = min(percent, 99.9)
+			}
+			fmt.Fprintf(stderr, "progress: %s: %.1f%% (%d/%d sampled frames, %d display sets)\n",
+				done.input, percent, p.Processed, p.Total, p.DisplaySets)
+			continue
+		}
 		for _, warning := range done.result.Warnings {
 			fmt.Fprintf(stderr, "warning: %s: %s\n", done.input, warning)
 			warnings++

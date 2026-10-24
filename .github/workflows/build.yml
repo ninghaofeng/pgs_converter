@@ -68,6 +68,9 @@ jobs:
       - name: Build, test and package
         shell: pwsh
         run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}"
+      - name: Build, audit and test standalone static executable
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}" -Static
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}

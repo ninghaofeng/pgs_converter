@@ -77,6 +77,49 @@ FFmpeg 不是必需依赖：相应工具可用时会执行独立解码测试及�
 查看脚本帮助可运行 `.\scripts\build-windows.cmd -?`
 或 `bash scripts/build-macos.sh --help`。
 
+### Windows 单 EXE 静态构建
+
+```powershell
+.\scripts\build-windows.cmd -Static
+# 显式允许安装缺少的依赖：
+.\scripts\build-windows.cmd -Static -InstallDependencies
+# 使用自定义位置的 MSYS2：
+.\scripts\build-windows.cmd -Static -Msys2Root D:\tools\msys64
+```
+
+如果当前就在 `scripts/` 目录中，使用 `.\build-windows.cmd -Static`。
+这是实际静态链接，不是启动后解压 DLL 的自解压程序。
+字体仍使用系统已安装字体，也保留 `--font-dir`，不捆绑字体文件。
+程序仍依赖 Windows 系统自带的 DLL（包括 Windows 10/11 的系统 UCRT），
+但不允许导入第三方渲染库或编译器运行库 DLL。
+
+构建会启用仅对 Windows 生效的 `pgs_static` cgo 指令，
+通过 `pkg-config --static` 展开私有依赖，并强制外部静态链接。
+整条依赖链都必须有对应架构的静态 `.a` 库；
+以 `.dll.a` 结尾的 DLL 导入库不能代替静态库。
+缺少库或出现未解析符号时会明确失败，不会自动退回 DLL 版。
+不加 `-Static` 的原构建方式保持不变。
+
+静态构建文件位于 `build/windows-<架构>-static/`，
+完整包位于唯一命名的 `dist/pgs-converter-windows-<架构>-static-.../`。
+运行时只需其中的 `pgs-converter.exe`；再分发时应保留附带的许可证和说明。
+脚本在报告成功前会按 Windows 系统 DLL 白名单审计 PE 导入表，
+然后仅复制 EXE 到临时目录，移除 PATH 中的 MSYS2 路径，
+实际转换 SRT 和动画 ASS。审计结果保存在 `PE-IMPORTS.txt`，
+已安装的软件包版本记录在 `MSYS2-PACKAGES.txt`。
+即使某个未知 DLL 恰好位于 System32，也会明确失败，不会默认为系统依赖。
+
+**再分发注意事项：**目前生成的仍是开发包。
+静态链接可能包含 FriBidi、GLib 等 LGPL 组件。
+仅附许可证文本不足以完成相关义务；公开再分发前，需要审核所有链接组件的许可证，
+提供适用的对应源码、目标文件或其他重新链接材料，以及允许用户替换 LGPL 库的重链接说明。
+脚本不会自动准备完整的合规材料，详见
+[THIRD_PARTY_NOTICES](./THIRD_PARTY_NOTICES) 和包内的 `STATIC-LINKING.txt`。
+
+Windows x64/ARM64 CI 均已加入静态构建。
+本地 macOS 开发环境尚未构建或执行 Windows 静态程序；
+平台认证仍需实际通过原生 CI 及干净环境测试。
+
 ### 手动构建（进阶）
 
 需要 Go 1.24 或更高版本、支持 cgo 的 C 编译器、pkg-config 和 libass 开发文件。
@@ -156,6 +199,15 @@ SRT 支持多行文本、重叠事件、HTML 实体、嵌套的 `b`/`i`/`u`、
 
 ## 批量转换
 
+转换开始时会输出 `START`，之后在标准错误流中显示每个文件的编码进度，
+约每 500 毫秒刷新一次（在帧处理之间），并输出初始和结束进度。
+百分比按合并后的有效字幕区间内已采样的帧数计算，不重复计算重叠事件，
+也不包含空白间隔；它不是视频时间或输出文件大小的百分比。
+`100%` 表示编码结束，只有 `OK` 才表示输出已刷新并提交成功。
+加载字体或处理单个高开销帧时，进度更新可能延迟。
+单文件和批量命令均可添加 `--no-progress` 关闭实时进度，
+仍保留警告、结果及汇总。进度采用逐行输出，重定向到日志时也适用。
+
 ```sh
 pgs-converter batch ./subtitles \
   --recursive --size 1920x1080 --fps 24000/1001 \
@@ -171,6 +223,9 @@ pgs-converter batch one.srt two.ass \
 - 单个文件失败不会中断其他文件。进度、警告、输入输出映射和最终汇总均写入标准错误流。
 - `--jobs` 默认为 1，支持 1 到 32。每个任务拥有独立的 libass 渲染器。
   提高并发数会增加原生字体缓存和图像内存的占用。
+  指定 `--jobs 2` 才会同时转换两个文件；不指定时按顺序处理。
+  4K 建议先从两个并发任务开始，并留意内存占用。
+  并发进度包含输入文件路径，日志统一串行输出，不会交叉写入同一行。
 - 默认保护已有文件，只有指定 `--overwrite` 才允许替换。
   转换先写入目标目录中的临时文件，成功后再提交为最终文件。
   禁止覆盖时使用硬链接提交：文件系统不支持硬链接会明确失败，而不会冒险覆盖。

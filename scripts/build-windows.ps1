@@ -5,21 +5,27 @@ Build, test and package the native Windows CLI without mandatory path arguments.
 By default, only checks for dependencies. -InstallDependencies permits winget
 to install Go/MSYS2 and pacman to install the matching native C toolchain/libass.
 Installers may request elevation. Existing packages are never deleted.
+-Static links third-party native libraries into the EXE and rejects remaining
+non-system DLL imports. Static redistribution requires a separate license review.
 .EXAMPLE
 .\scripts\build-windows.ps1
 .EXAMPLE
 .\scripts\build-windows.ps1 -InstallDependencies
 .EXAMPLE
 .\scripts\build-windows.ps1 -Msys2Root D:\tools\msys64
+.EXAMPLE
+.\scripts\build-windows.ps1 -Static
 #>
 [CmdletBinding()]
 param(
     [switch]$InstallDependencies,
-    [string]$Msys2Root
+    [string]$Msys2Root,
+    [switch]$Static
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot/windows-static.ps1"
 
 function Invoke-CheckedNative {
     param([string]$FilePath, [string[]]$Arguments)
@@ -116,7 +122,7 @@ function Install-WingetPackage {
 }
 
 function Invoke-WindowsBuild {
-    param([switch]$AllowInstall, [string]$RequestedRoot)
+    param([switch]$AllowInstall, [string]$RequestedRoot, [switch]$UseStatic)
     if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
         throw "This script requires Windows. Use build-macos.sh on macOS."
     }
@@ -133,6 +139,7 @@ function Invoke-WindowsBuild {
     $saved = @{}
     foreach ($name in $names) { $saved[$name] = [System.Environment]::GetEnvironmentVariable($name, "Process") }
     $smoke = $null
+    $isolated = $null
     Push-Location -LiteralPath $repo
     try {
         $env:GOTOOLCHAIN = "local"
@@ -177,6 +184,9 @@ function Invoke-WindowsBuild {
             if (-not (Test-Path -LiteralPath (Join-Path $prefix $relative) -PathType Leaf)) {
                 throw "Required tool is still missing: $prefix/$relative. Finish the MSYS2 installation/update and retry."
             }
+            if ($UseStatic -and -not (Test-Path -LiteralPath "$prefix/lib/libass.a" -PathType Leaf)) {
+                throw "Static archive is missing: $prefix/lib/libass.a. Install an MSYS2 libass package containing static libraries; a DLL/import library alone is insufficient."
+            }
         }
         $env:Path = "$prefix\bin;$env:Path"
         # Use forward slashes for cgo's command parser, including quoted paths
@@ -184,26 +194,64 @@ function Invoke-WindowsBuild {
         $compiler = (Join-Path $prefix "bin/$($target.Compiler)").Replace("\", "/")
         $env:CC = '"' + $compiler + '"'
         $pkgConfig = Join-Path $prefix "bin/pkg-config.exe"
-        $env:PKG_CONFIG = '"' + $pkgConfig.Replace("\", "/") + '"'
+        $link = Get-WindowsLinkConfiguration $pkgConfig -UseStatic:$UseStatic
+        $env:PKG_CONFIG = $link.PkgConfig
         $env:PKG_CONFIG_PATH = "$prefix/lib/pkgconfig;$prefix/share/pkgconfig"
         $env:PKG_CONFIG_LIBDIR = $env:PKG_CONFIG_PATH
         Remove-Item Env:PKG_CONFIG_SYSROOT_DIR -ErrorAction SilentlyContinue
-        Invoke-CheckedNative $pkgConfig @("--exists", "libass")
-        Write-Host "Building Windows $($target.Arch) with $($go.Path) and $prefix"
-        Invoke-CheckedNative $go.Path @("test", "./...")
-        Invoke-CheckedNative $go.Path @("vet", "./...")
+        $pkgArgs = @("--exists", "libass")
+        if ($UseStatic) { $pkgArgs = @("--static") + $pkgArgs }
+        Invoke-CheckedNative $pkgConfig $pkgArgs
+        $mode = "shared"
+        if ($UseStatic) { $mode = "static" }
+        Write-Host "Building Windows $($target.Arch) ($mode) with $($go.Path) and $prefix"
+        $testArgs = @("test")
+        if ($UseStatic) { $testArgs += @("-tags", $link.BuildTags, "-ldflags", $link.LinkerFlags) }
+        Invoke-CheckedNative $go.Path ($testArgs + "./...")
+        $vetArgs = @("vet")
+        if ($UseStatic) { $vetArgs += @("-tags", $link.BuildTags) }
+        Invoke-CheckedNative $go.Path ($vetArgs + "./...")
         $runId = "$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$PID"
         $build = Join-Path $repo "build/windows-$($target.Arch)"
         $packageName = "pgs-converter-windows-$($target.Arch)-$runId"
+        if ($UseStatic) {
+            $build += "-static"
+            $packageName = "pgs-converter-windows-$($target.Arch)-static-$runId"
+        }
         $destination = Join-Path $repo "dist/$packageName"
         New-Item -ItemType Directory -Force -Path $build, (Join-Path $repo "dist") | Out-Null
         $binary = Join-Path $build "pgs-converter.exe"
         $version = "dev"
         if ($env:GITHUB_SHA) { $version = $env:GITHUB_SHA }
-        Invoke-CheckedNative $go.Path @("build", "-trimpath", "-ldflags", "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=$version", "-o", $binary, "./cmd/pgs-converter")
-        & "$PSScriptRoot/bundle-windows.ps1" -Binary $binary -Prefix $prefix -Destination $destination -Objdump (Join-Path $prefix "bin/$($target.Objdump)")
+        $buildFlags = "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=$version"
+        if ($UseStatic) { $buildFlags += " $($link.LinkerFlags)" }
+        $buildArgs = @("build", "-trimpath")
+        if ($UseStatic) { $buildArgs += @("-tags", $link.BuildTags) }
+        Invoke-CheckedNative $go.Path ($buildArgs + @("-ldflags", $buildFlags, "-o", $binary, "./cmd/pgs-converter"))
+        & "$PSScriptRoot/bundle-windows.ps1" -Binary $binary -Prefix $prefix -Destination $destination -Objdump (Join-Path $prefix "bin/$($target.Objdump)") -Static:$UseStatic
+        if ($UseStatic) {
+            Invoke-CheckedNative (Join-Path $msys "usr/bin/pacman.exe") @("-Q") |
+                Set-Content -LiteralPath "$destination/MSYS2-PACKAGES.txt" -Encoding Ascii
+        }
         $smoke = Join-Path $build "smoke-$runId.sup"
-        Invoke-CheckedNative "$destination/pgs-converter.exe" @("convert", "testdata/sample.srt", "--size", "1280x720", "--fps", "24", "-o", $smoke)
+        if ($UseStatic) {
+            $isolated = Join-Path ([System.IO.Path]::GetTempPath()) ("pgs-static-smoke-" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $isolated | Out-Null
+            Copy-Item -LiteralPath "$destination/pgs-converter.exe" -Destination $isolated
+            $buildPath = $env:Path
+            Push-Location -LiteralPath $isolated
+            try {
+                $env:Path = "$env:SystemRoot\System32;$env:SystemRoot"
+                foreach ($fixture in @("sample.srt", "animated.ass")) {
+                    Invoke-CheckedNative "$isolated/pgs-converter.exe" @("convert", "$repo/testdata/$fixture", "--size", "1280x720", "--fps", "24000/1001", "--overwrite", "-o", $smoke)
+                }
+            } finally {
+                $env:Path = $buildPath
+                Pop-Location
+            }
+        } else {
+            Invoke-CheckedNative "$destination/pgs-converter.exe" @("convert", "$repo/testdata/sample.srt", "--size", "1280x720", "--fps", "24", "-o", $smoke)
+        }
         $probe = Get-Command ffprobe -CommandType Application -ErrorAction SilentlyContinue
         if ($probe) {
             Invoke-CheckedNative $probe.Source @("-v", "error", "-show_streams", $smoke)
@@ -218,13 +266,14 @@ function Invoke-WindowsBuild {
         foreach ($name in $names) { [System.Environment]::SetEnvironmentVariable($name, $saved[$name], "Process") }
         Pop-Location
         if ($smoke -and (Test-Path -LiteralPath $smoke)) { Remove-Item -LiteralPath $smoke }
+        if ($isolated -and (Test-Path -LiteralPath $isolated)) { Remove-Item -Recurse -LiteralPath $isolated }
     }
 }
 
 # Dot-sourcing exposes helpers for tests without starting installers or a build.
 if ($MyInvocation.InvocationName -ne ".") {
     try {
-        Invoke-WindowsBuild -AllowInstall:$InstallDependencies -RequestedRoot $Msys2Root
+        Invoke-WindowsBuild -AllowInstall:$InstallDependencies -RequestedRoot $Msys2Root -UseStatic:$Static
     } catch {
         [System.Console]::Error.WriteLine("Build failed: " + $_.Exception.Message)
         exit 1

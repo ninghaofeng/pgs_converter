@@ -77,6 +77,51 @@ Use the executable inside that directory; keep its accompanying libraries.
 Run `.\scripts\build-windows.cmd -?` or
 `bash scripts/build-macos.sh --help` for help.
 
+### Windows single-EXE static build
+
+```powershell
+.\scripts\build-windows.cmd -Static
+# If dependency installation is explicitly allowed:
+.\scripts\build-windows.cmd -Static -InstallDependencies
+# Existing MSYS2 in a custom location:
+.\scripts\build-windows.cmd -Static -Msys2Root D:\tools\msys64
+```
+
+From inside `scripts/`, use `.\build-windows.cmd -Static` instead.
+This is real static linking, not an executable that extracts DLLs at startup.
+It uses the same system-font lookup and optional `--font-dir`; no fonts are
+bundled. Windows-provided DLLs (including the OS UCRT on Windows 10/11) remain
+required, but third-party renderer/compiler-runtime DLLs must not be imported.
+
+The build enables the Windows-only `pgs_static` cgo directives, requests
+`pkg-config --static` private dependencies, and forces static external linking.
+Matching static `.a` libraries for the entire dependency chain are required;
+an import library ending in `.dll.a` is not a substitute. Missing libraries or
+unresolved symbols fail the build, with no fallback to the DLL version.
+The existing build without `-Static` remains unchanged.
+
+Outputs use `build/windows-<arch>-static/` and a uniquely named
+`dist/pgs-converter-windows-<arch>-static-.../` package. Only
+`pgs-converter.exe` is needed to run it; keep the accompanying notices and
+documentation when distributing the package. Before declaring success the
+script audits PE imports against a Windows system-DLL allowlist, then copies
+only the EXE to a temporary directory and converts SRT and animated ASS with
+MSYS2 removed from PATH. `PE-IMPORTS.txt` records the audit result and
+`MSYS2-PACKAGES.txt` records installed package versions. An unknown
+import fails explicitly even if that DLL happens to exist in System32.
+
+**Redistribution:** this remains a development package. Static linking may
+include LGPL components such as FriBidi and GLib. License text alone is not
+sufficient: before redistribution, review all linked licenses and provide
+applicable corresponding sources and object/relinking materials and
+instructions allowing users to relink with modified LGPL libraries. The
+scripts do not automatically assemble those compliance materials; see
+`THIRD_PARTY_NOTICES` and the generated `STATIC-LINKING.txt`.
+
+Static builds are included in the Windows x64/ARM64 CI jobs. They have not been
+built or executed on the local macOS development machine; passing native CI
+and clean-machine checks is still required before platform certification.
+
 ### Manual build (advanced)
 
 Requirements: Go 1.24+, a cgo-compatible C compiler, pkg-config and libass
@@ -149,6 +194,16 @@ on parsed events; they are not truncated to ASS centiseconds.
 
 ## Batch conversion
 
+Conversions print a `START` line, then per-file encoding progress to stderr
+approximately every 500 ms (between frames), plus initial and final updates.
+Percentages count sampled frames in merged active subtitle intervals, excluding
+blank gaps; they are not percentages of the video duration or output size.
+The final `100%` means encoding finished; only `OK` confirms the output was
+flushed and committed. Loading fonts and a single expensive frame can delay an
+update. Use `--no-progress` with either command to disable live updates while
+keeping warnings, results and the summary. Output uses separate lines, including
+when redirected to a log.
+
 ```sh
 pgs-converter batch ./subtitles \
   --recursive --size 1920x1080 --fps 24000/1001 \
@@ -166,6 +221,9 @@ pgs-converter batch one.srt two.ass \
   and a final summary are written to stderr.
 - `--jobs` defaults to 1 and accepts 1..32. Each job owns its libass renderer.
   Higher concurrency increases native font-cache and image memory use.
+  Set `--jobs 2` to convert two files concurrently; without it, files run
+  sequentially. For 4K, start with two workers and monitor memory usage.
+  Concurrent progress lines include the input path and are serialized.
 - Existing files are protected unless `--overwrite` is given. Conversion writes
   to a temporary file beside the destination and commits only after success.
   No-overwrite commits use hard links: filesystems without hard-link support

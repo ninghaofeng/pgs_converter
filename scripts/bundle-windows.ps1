@@ -1,13 +1,15 @@
-# Bundle a native Go/cgo executable and the transitive DLLs it actually imports.
+# Bundle native Go/cgo output, auditing rather than copying DLLs in static mode.
 # Run from the repository root with the matching MSYS2 prefix and objdump on PATH.
 # This creates a development archive directory, not a signed Windows installer.
 param(
     [Parameter(Mandatory=$true)][string]$Binary,
     [Parameter(Mandatory=$true)][string]$Prefix,
     [Parameter(Mandatory=$true)][string]$Destination,
-    [string]$Objdump = "objdump"
+    [string]$Objdump = "objdump",
+    [switch]$Static
 )
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot/windows-static.ps1"
 if (Test-Path $Destination) { throw "Output directory already exists: $Destination" }
 New-Item -ItemType Directory -Path $Destination | Out-Null
 Copy-Item $Binary "$Destination/pgs-converter.exe"
@@ -18,6 +20,10 @@ while ($queue.Count -gt 0) {
     $current = $queue.Dequeue()
     $imports = & $Objdump -p $current
     if ($LASTEXITCODE -ne 0) { throw "Cannot inspect imports of $current" }
+    if ($Static) {
+        Assert-WindowsStaticImports $imports | Set-Content -LiteralPath "$Destination/PE-IMPORTS.txt" -Encoding Ascii
+        continue
+    }
     foreach ($line in $imports) {
         if ($line -notmatch 'DLL Name:\s*(\S+)') { continue }
         $name = $Matches[1]
@@ -50,6 +56,20 @@ New-Item -ItemType Directory -Path "$Destination/licenses/go" | Out-Null
 Copy-Item "$goroot/LICENSE", "$goroot/PATENTS" "$Destination/licenses/go/"
 & go version | Out-File "$Destination/BUILD-INFO.txt"
 & pkg-config --modversion libass | Out-File -Append "$Destination/BUILD-INFO.txt"
+if ($Static) {
+    @(
+        "Build tag: pgs_static; external linker: -static.",
+        "Linkage: static native libraries; Windows system DLLs remain required.",
+        "Fonts: system fonts or user-supplied --font-dir; no fonts bundled.",
+        "This is a development package, not a redistribution-compliance bundle.",
+        "Before redistribution, provide applicable LGPL corresponding sources",
+        "and the materials/instructions needed to relink against modified LGPL",
+        "libraries. License notices alone do not satisfy those requirements.",
+        "See THIRD_PARTY_NOTICES and the README static-build section."
+    ) | Set-Content -LiteralPath "$Destination/STATIC-LINKING.txt" -Encoding Ascii
+    & pkg-config --static --libs libass | Out-File -Append "$Destination/BUILD-INFO.txt"
+    if ($LASTEXITCODE -ne 0) { throw "Cannot record static native dependency flags" }
+}
 # Starting the packaged binary catches unresolved DLLs before archive creation.
 & "$Destination/pgs-converter.exe" version
 if ($LASTEXITCODE -ne 0) { throw "Packaged binary failed to start" }

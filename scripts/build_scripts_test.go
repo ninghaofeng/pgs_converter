@@ -1,6 +1,7 @@
 package scripts_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,46 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestWindowsStaticCgoConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		os, tags string
+		static   bool
+	}{
+		{"windows", "", false},
+		{"windows", "pgs_static", true},
+		{"darwin", "pgs_static", false},
+	} {
+		t.Run(tc.os+"/"+tc.tags, func(t *testing.T) {
+			cmd := exec.Command("go", "list", "-json", "-tags", tc.tags, "../internal/render")
+			cmd.Env = append(os.Environ(), "GOOS="+tc.os, "GOARCH=amd64", "CGO_ENABLED=1")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("inspect cgo configuration: %v: %s", err, output)
+			}
+			var pkg struct {
+				CgoPkgConfig []string
+				CgoLDFLAGS   []string
+			}
+			if err := json.Unmarshal(output, &pkg); err != nil {
+				t.Fatal(err)
+			}
+			has := func(values []string, want string) bool {
+				for _, value := range values {
+					if value == want {
+						return true
+					}
+				}
+				return false
+			}
+			if !has(pkg.CgoPkgConfig, "libass") ||
+				has(pkg.CgoPkgConfig, "--static") != tc.static ||
+				has(pkg.CgoLDFLAGS, "-static") != tc.static {
+				t.Fatalf("incorrect cgo link mode: %+v", pkg)
+			}
+		})
+	}
+}
 
 func scriptPath(t *testing.T, name string) string {
 	t.Helper()

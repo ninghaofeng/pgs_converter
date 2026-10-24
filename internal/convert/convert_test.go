@@ -7,11 +7,13 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/ninghaofeng/pgs_converter/internal/colorx"
 	"github.com/ninghaofeng/pgs_converter/internal/render"
@@ -50,6 +52,83 @@ func compositions(t *testing.T, data []byte) []struct {
 		data = data[13+n:]
 	}
 	return out
+}
+
+type delayedWriter struct {
+	bytes.Buffer
+	delayed bool
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func (w *delayedWriter) Write(p []byte) (int, error) {
+	if !w.delayed {
+		time.Sleep(550 * time.Millisecond)
+		w.delayed = true
+	}
+	return w.Buffer.Write(p)
+}
+
+func TestProgress(t *testing.T) {
+	const fixture = "../../testdata/decoder.ass"
+	opt := options()
+	var updates []Progress
+	opt.Progress = func(p Progress) { updates = append(updates, p) }
+	var output delayedWriter
+	result, err := Stream(context.Background(), fixture, &output, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) < 3 || updates[0].Processed != 0 {
+		t.Fatalf("missing initial or live progress: %+v", updates)
+	}
+	for i, p := range updates {
+		// The two active intervals cover 60 frames; overlaps and blank gaps
+		// must not inflate the denominator.
+		if p.Total != 60 || p.Processed < 0 || p.Processed > p.Total {
+			t.Fatalf("invalid progress: %+v", p)
+		}
+		if i > 0 && p.Processed <= updates[i-1].Processed {
+			t.Fatalf("non-increasing progress: %+v", updates)
+		}
+	}
+	final := updates[len(updates)-1]
+	if final.Processed != final.Total || final.DisplaySets != result.Frames {
+		t.Fatalf("incomplete final progress: %+v", final)
+	}
+	opt.Progress = nil
+	var baseline bytes.Buffer
+	if _, err := Stream(context.Background(), fixture, &baseline, opt); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(output.Bytes(), baseline.Bytes()) {
+		t.Fatal("progress changed the encoded output")
+	}
+
+	updates = nil
+	opt.Progress = func(p Progress) { updates = append(updates, p) }
+	if _, err := Stream(context.Background(), fixture, failingWriter{}, opt); err != io.ErrClosedPipe {
+		t.Fatalf("expected write failure, got %v", err)
+	}
+	if len(updates) != 1 || updates[0].Processed != 0 {
+		t.Fatalf("write failure reported completed progress: %+v", updates)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates = nil
+	opt.Progress = func(p Progress) {
+		updates = append(updates, p)
+		cancel()
+	}
+	if _, err := Stream(ctx, fixture, io.Discard, opt); err != context.Canceled {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if len(updates) != 1 || updates[0].Processed != 0 {
+		t.Fatalf("cancellation reported completed progress: %+v", updates)
+	}
 }
 
 func TestStreamTimingAndClear(t *testing.T) {

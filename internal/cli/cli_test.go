@@ -48,6 +48,57 @@ func TestHDRDefaultAndWarningSummary(t *testing.T) {
 	}
 }
 
+func TestLiveProgress(t *testing.T) {
+	for _, quiet := range []bool{false, true} {
+		output := filepath.Join(t.TempDir(), "out.sup")
+		args := []string{"convert", "../../testdata/sample.srt", "--size", "1280x720", "--fps", "24", "-o", output}
+		if quiet {
+			args = append(args, "--no-progress")
+		}
+		var stdout, stderr bytes.Buffer
+		if code := Run(context.Background(), args, &stdout, &stderr); code != 0 {
+			t.Fatalf("status=%d: %s", code, stderr.String())
+		}
+		log := stderr.String()
+		if stdout.Len() != 0 || !strings.Contains(log, "OK ") {
+			t.Fatalf("progress changed output streams or results: %s", log)
+		}
+		if quiet {
+			if strings.Contains(log, "progress:") || strings.Contains(log, "START ") {
+				t.Fatalf("--no-progress did not disable live output: %s", log)
+			}
+		} else {
+			initial := strings.Index(log, "0.0%")
+			final := strings.Index(log, "100.0%")
+			done := strings.Index(log, "OK ")
+			if !strings.Contains(log, "START ") || initial < 0 || final <= initial || done <= final {
+				t.Fatalf("missing or unordered progress: %s", log)
+			}
+		}
+	}
+}
+
+func TestConcurrentProgress(t *testing.T) {
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	inputs := []string{"../../testdata/sample.srt", "../../testdata/decoder.ass"}
+	args := append([]string{"batch"}, inputs...)
+	args = append(args, "--size", "1280x720", "--fps", "24", "--output-dir", root, "--jobs", "2")
+	if code := Run(context.Background(), args, &stdout, &stderr); code != 0 {
+		t.Fatalf("status=%d: %s", code, stderr.String())
+	}
+	log := stderr.String()
+	for _, input := range inputs {
+		for _, suffix := range []string{": 0.0%", ": 100.0%"} {
+			if !strings.Contains(log, "progress: "+input+suffix) {
+				t.Fatalf("missing per-file batch progress for %s: %s", input, log)
+			}
+		}
+	}
+	if !strings.Contains(log, "2 succeeded, 0 failed") || stdout.Len() != 0 {
+		t.Fatalf("unexpected batch summary/streams: %s", log)
+	}
+}
 func TestBatchContinueAndCollision(t *testing.T) {
 	root := t.TempDir()
 	input, output := filepath.Join(root, "input"), filepath.Join(root, "output")

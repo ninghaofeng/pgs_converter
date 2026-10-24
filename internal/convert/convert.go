@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ninghaofeng/pgs_converter/internal/colorx"
 	"github.com/ninghaofeng/pgs_converter/internal/pgs"
@@ -33,6 +34,16 @@ type Options struct {
 	Style         subtitle.Style
 	Strict        bool
 	Overwrite     bool
+	// Progress runs synchronously on the conversion goroutine. Callers sharing
+	// a callback between conversions must synchronize any shared state.
+	Progress func(Progress)
+}
+
+// Progress measures sampled frames in merged active subtitle intervals, excluding
+// blank gaps. Reaching Total means encoding finished, not that File committed.
+type Progress struct {
+	Processed, Total int64
+	DisplaySets      int
 }
 
 // Result includes completed display sets and diagnostics, even on failure.
@@ -166,6 +177,18 @@ func Stream(ctx context.Context, path string, dst io.Writer, opt Options) (Resul
 			merged = append(merged, s)
 		}
 	}
+	var processed, total int64
+	for _, s := range merged {
+		total += s.end - s.start
+	}
+	lastReport := time.Now()
+	report := func() {
+		opt.Progress(Progress{Processed: processed, Total: total, DisplaySets: result.Frames})
+		lastReport = time.Now()
+	}
+	if opt.Progress != nil {
+		report()
+	}
 	var previous *image.NRGBA
 	// Compare placement as well as pixels: a moving unchanged bitmap is still
 	// a visible update. Keep only the last image, not the full frame sequence.
@@ -203,6 +226,10 @@ func Stream(ctx context.Context, path string, dst io.Writer, opt Options) (Resul
 					return result, err
 				}
 			}
+			processed++
+			if opt.Progress != nil && processed < total && time.Since(lastReport) >= 500*time.Millisecond {
+				report()
+			}
 		}
 		// Advance libass to the blank boundary as well as writing a clear.
 		// Its next change hint must be relative to blank, not the preceding text.
@@ -218,6 +245,9 @@ func Stream(ctx context.Context, path string, dst io.Writer, opt Options) (Resul
 	}
 	if result.Frames == 0 {
 		return result, fmt.Errorf("libass produced no visible subtitle images")
+	}
+	if opt.Progress != nil {
+		report()
 	}
 	return result, nil
 }

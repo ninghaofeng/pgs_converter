@@ -4,6 +4,8 @@ package render
 
 /*
 #cgo pkg-config: libass
+#cgo windows,pgs_static pkg-config: --static
+#cgo windows,pgs_static LDFLAGS: -static
 #include "bridge.h"
 */
 import "C"
