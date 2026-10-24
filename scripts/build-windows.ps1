@@ -1,0 +1,219 @@
+<#
+.SYNOPSIS
+Build, test and package the native Windows CLI without mandatory path arguments.
+.DESCRIPTION
+By default, only checks for dependencies. -InstallDependencies permits winget
+to install Go/MSYS2 and pacman to install the matching native C toolchain/libass.
+Installers may request elevation. Existing packages are never deleted.
+.EXAMPLE
+.\scripts\build-windows.ps1
+.EXAMPLE
+.\scripts\build-windows.ps1 -InstallDependencies
+.EXAMPLE
+.\scripts\build-windows.ps1 -Msys2Root D:\tools\msys64
+#>
+[CmdletBinding()]
+param(
+    [switch]$InstallDependencies,
+    [string]$Msys2Root
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+function Invoke-CheckedNative {
+    param([string]$FilePath, [string[]]$Arguments)
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath failed with exit code $LASTEXITCODE. Check its output above before retrying."
+    }
+}
+
+function Get-TargetConfiguration {
+    param([string]$Architecture)
+    switch ($Architecture.ToLowerInvariant()) {
+        "x64" {
+            return [pscustomobject]@{
+                Arch = "amd64"; System = "UCRT64"; Prefix = "ucrt64"
+                Compiler = "gcc.exe"; Objdump = "objdump.exe"
+                Packages = "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libass mingw-w64-ucrt-x86_64-pkgconf"
+            }
+        }
+        "arm64" {
+            return [pscustomobject]@{
+                Arch = "arm64"; System = "CLANGARM64"; Prefix = "clangarm64"
+                Compiler = "clang.exe"; Objdump = "llvm-objdump.exe"
+                Packages = "pacman -S --needed --noconfirm mingw-w64-clang-aarch64-clang mingw-w64-clang-aarch64-libass mingw-w64-clang-aarch64-pkgconf"
+            }
+        }
+        default { throw "Unsupported Windows architecture: $Architecture. Only x64 and ARM64 are supported." }
+    }
+}
+
+function Find-Msys2Root {
+    param([string]$RequestedRoot)
+    if ($RequestedRoot) {
+        $full = [System.IO.Path]::GetFullPath($RequestedRoot)
+        if (-not (Test-Path -LiteralPath "$full/usr/bin/bash.exe" -PathType Leaf)) {
+            throw "Invalid MSYS2 root: $full. Supply its root (for example C:\msys64), not the ucrt64/clangarm64 subdirectory."
+        }
+        return $full
+    }
+    $candidates = @($env:MSYS2_ROOT, "$env:SystemDrive\msys64", "C:\tools\msys64")
+    if ($env:LOCALAPPDATA) {
+        $candidates += "$env:LOCALAPPDATA\Programs\msys64"
+    }
+    $shell = Get-Command msys2_shell.cmd -CommandType Application -ErrorAction SilentlyContinue
+    if ($shell) { $candidates += Split-Path -Parent $shell.Source }
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath "$candidate/usr/bin/bash.exe" -PathType Leaf)) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+    return $null
+}
+
+function Get-GoStatus {
+    param([version]$Minimum, [string]$Architecture)
+    $command = Get-Command go -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $command) {
+        return [pscustomobject]@{ Ready = $false; Reason = "Go is missing."; Path = $null }
+    }
+    $text = & $command.Source version
+    if ($LASTEXITCODE -ne 0) { throw "Cannot query Go version: $($command.Source)" }
+    $match = [regex]::Match(($text -join " "), '\bgo(\d+\.\d+\.\d+)\s')
+    if (-not $match.Success -or [version]$match.Groups[1].Value -lt $Minimum) {
+        return [pscustomobject]@{ Ready = $false; Reason = "Go $Minimum or newer is required."; Path = $command.Source }
+    }
+    $hostArch = & $command.Source env GOHOSTARCH
+    if ($LASTEXITCODE -ne 0) { throw "Cannot query the Go host architecture." }
+    if ($hostArch.Trim() -ne $Architecture) {
+        return [pscustomobject]@{ Ready = $false; Reason = "Go must match the native $Architecture architecture."; Path = $command.Source }
+    }
+    return [pscustomobject]@{ Ready = $true; Reason = ""; Path = $command.Source }
+}
+
+function Install-WingetPackage {
+    param([string]$Id)
+    $winget = Get-Command winget -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $winget) {
+        throw "winget is missing. Install/update Microsoft's App Installer, or install $Id manually, then rerun this script."
+    }
+    Invoke-CheckedNative $winget.Source @("install", "--id", $Id, "--exact", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements")
+}
+
+function Invoke-WindowsBuild {
+    param([switch]$AllowInstall, [string]$RequestedRoot)
+    if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+        throw "This script requires Windows. Use build-macos.sh on macOS."
+    }
+    $repo = Split-Path -Parent $PSScriptRoot
+    $target = Get-TargetConfiguration ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString())
+    # Resolve relative user paths before changing into the repository.
+    $msys = Find-Msys2Root $RequestedRoot
+    $minimumMatch = [regex]::Match((Get-Content -LiteralPath "$repo/go.mod" -Raw), '(?m)^go\s+(\d+\.\d+(?:\.\d+)?)\s*$')
+    if (-not $minimumMatch.Success) { throw "Cannot read the minimum Go version from go.mod." }
+    $minimum = [version]$minimumMatch.Groups[1].Value
+
+    # Restore the caller's shell even after a failed install, compile or package.
+    $names = @("Path", "GOOS", "GOARCH", "CGO_ENABLED", "CC", "PKG_CONFIG", "PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR", "GOTOOLCHAIN", "MSYSTEM", "MSYS2_PATH_TYPE", "CHERE_INVOKING")
+    $saved = @{}
+    foreach ($name in $names) { $saved[$name] = [System.Environment]::GetEnvironmentVariable($name, "Process") }
+    $smoke = $null
+    Push-Location -LiteralPath $repo
+    try {
+        $env:GOTOOLCHAIN = "local"
+        $env:GOOS = "windows"
+        $env:GOARCH = $target.Arch
+        $env:CGO_ENABLED = "1"
+        $go = Get-GoStatus $minimum $target.Arch
+        if (-not $go.Ready) {
+            if (-not $AllowInstall) { throw "$($go.Reason) Rerun with -InstallDependencies, or install native Go manually." }
+            Install-WingetPackage "GoLang.Go"
+            $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+            $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+            $env:Path = "$env:ProgramFiles\Go\bin;$machinePath;$userPath;$env:Path"
+            $go = Get-GoStatus $minimum $target.Arch
+            if (-not $go.Ready) { throw "$($go.Reason) Restart the terminal after installation and retry." }
+        }
+        if (-not $msys) {
+            if (-not $AllowInstall) {
+                throw "MSYS2 was not found. Rerun with -InstallDependencies, or use -Msys2Root D:\path\to\msys64."
+            }
+            Install-WingetPackage "MSYS2.MSYS2"
+            $msys = Find-Msys2Root ""
+            if (-not $msys) { throw "MSYS2 was installed but not located. Rerun with -Msys2Root pointing to its root directory." }
+        }
+        $prefix = Join-Path $msys $target.Prefix
+        $required = @("bin/$($target.Compiler)", "bin/$($target.Objdump)", "bin/pkg-config.exe", "lib/pkgconfig/libass.pc")
+        $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $prefix $_) -PathType Leaf) })
+        if ($missing.Count -gt 0) {
+            if (-not $AllowInstall) {
+                throw "Missing $($target.System) tools: $($missing -join ', '). Rerun with -InstallDependencies to install the matching compiler, pkgconf and libass."
+            }
+            $env:MSYSTEM = $target.System
+            $env:MSYS2_PATH_TYPE = "minimal"
+            $env:CHERE_INVOKING = "1"
+            $bash = Join-Path $msys "usr/bin/bash.exe"
+            # Core MSYS2 updates can require a new shell before the full upgrade.
+            Invoke-CheckedNative $bash @("-lc", "pacman -Syu --noconfirm")
+            Invoke-CheckedNative $bash @("-lc", "pacman -Syu --noconfirm")
+            Invoke-CheckedNative $bash @("-lc", $target.Packages)
+        }
+        foreach ($relative in $required) {
+            if (-not (Test-Path -LiteralPath (Join-Path $prefix $relative) -PathType Leaf)) {
+                throw "Required tool is still missing: $prefix/$relative. Finish the MSYS2 installation/update and retry."
+            }
+        }
+        $env:Path = "$prefix\bin;$env:Path"
+        # Use forward slashes for cgo's command parser, including quoted paths
+        # when the MSYS2 installation directory contains spaces.
+        $compiler = (Join-Path $prefix "bin/$($target.Compiler)").Replace("\", "/")
+        $env:CC = '"' + $compiler + '"'
+        $pkgConfig = Join-Path $prefix "bin/pkg-config.exe"
+        $env:PKG_CONFIG = '"' + $pkgConfig.Replace("\", "/") + '"'
+        $env:PKG_CONFIG_PATH = "$prefix/lib/pkgconfig;$prefix/share/pkgconfig"
+        $env:PKG_CONFIG_LIBDIR = $env:PKG_CONFIG_PATH
+        Remove-Item Env:PKG_CONFIG_SYSROOT_DIR -ErrorAction SilentlyContinue
+        Invoke-CheckedNative $pkgConfig @("--exists", "libass")
+        Write-Host "Building Windows $($target.Arch) with $($go.Path) and $prefix"
+        Invoke-CheckedNative $go.Path @("test", "./...")
+        Invoke-CheckedNative $go.Path @("vet", "./...")
+        $runId = "$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')-$PID"
+        $build = Join-Path $repo "build/windows-$($target.Arch)"
+        $packageName = "pgs-converter-windows-$($target.Arch)-$runId"
+        $destination = Join-Path $repo "dist/$packageName"
+        New-Item -ItemType Directory -Force -Path $build, (Join-Path $repo "dist") | Out-Null
+        $binary = Join-Path $build "pgs-converter.exe"
+        $version = "dev"
+        if ($env:GITHUB_SHA) { $version = $env:GITHUB_SHA }
+        Invoke-CheckedNative $go.Path @("build", "-trimpath", "-ldflags", "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=$version", "-o", $binary, "./cmd/pgs-converter")
+        & "$PSScriptRoot/bundle-windows.ps1" -Binary $binary -Prefix $prefix -Destination $destination -Objdump (Join-Path $prefix "bin/$($target.Objdump)")
+        $smoke = Join-Path $build "smoke-$runId.sup"
+        Invoke-CheckedNative "$destination/pgs-converter.exe" @("convert", "testdata/sample.srt", "--size", "1280x720", "--fps", "24", "-o", $smoke)
+        $probe = Get-Command ffprobe -CommandType Application -ErrorAction SilentlyContinue
+        if ($probe) {
+            Invoke-CheckedNative $probe.Source @("-v", "error", "-show_streams", $smoke)
+        } else {
+            Write-Host "Skipping independent packaged-output probe: ffprobe is not installed."
+        }
+        Compress-Archive -LiteralPath $destination -DestinationPath "$destination.zip"
+        $hash = (Get-FileHash -LiteralPath "$destination.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  $packageName.zip" | Set-Content -LiteralPath "$destination.zip.sha256" -Encoding Ascii
+        Write-Host "`nBuild succeeded.`nExecutable: $destination/pgs-converter.exe`nArchive: $destination.zip`nChecksum: $destination.zip.sha256"
+    } finally {
+        foreach ($name in $names) { [System.Environment]::SetEnvironmentVariable($name, $saved[$name], "Process") }
+        Pop-Location
+        if ($smoke -and (Test-Path -LiteralPath $smoke)) { Remove-Item -LiteralPath $smoke }
+    }
+}
+
+# Dot-sourcing exposes helpers for tests without starting installers or a build.
+if ($MyInvocation.InvocationName -ne ".") {
+    try {
+        Invoke-WindowsBuild -AllowInstall:$InstallDependencies -RequestedRoot $Msys2Root
+    } catch {
+        [System.Console]::Error.WriteLine("Build failed: " + $_.Exception.Message)
+        exit 1
+    }
+}

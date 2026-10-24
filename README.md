@@ -11,11 +11,78 @@ It does not encode video, perform OCR, or mux MKV files.
 
 ## Build
 
+### Recommended: one-command build and package
+
+Run these commands from the project directory. No `Binary`, `Prefix` or
+`Destination` arguments are needed: the entry points detect the native
+architecture, locate dependencies, run tests and vet, build the CLI, collect
+shared libraries and licenses, and test the packaged executable.
+
+**Windows (PowerShell or Command Prompt):**
+
+```powershell
+.\scripts\build-windows.cmd
+```
+
+If dependencies are missing, the default is to stop with guidance, **not**
+install software. To explicitly allow dependency installation:
+
+```powershell
+.\scripts\build-windows.cmd -InstallDependencies
+```
+
+This permits winget to install missing Go/MSYS2, and MSYS2's pacman to install
+the matching compiler, pkgconf and libass. Microsoft's **App Installer**
+(`winget`) must already be available if Go/MSYS2 need automatic installation.
+Installers may request administrator approval. After installation or an MSYS2
+core update, follow any restart/retry instructions and rerun the command.
+For an existing nonstandard MSYS2 installation, add:
+
+```powershell
+.\scripts\build-windows.cmd -Msys2Root D:\tools\msys64
+```
+
+Supply the MSYS2 root, not its `ucrt64` or `clangarm64` subdirectory.
+The launcher uses a process-scoped PowerShell execution-policy bypass; it does
+not permanently change the machine's policy.
+
+**macOS (Terminal):**
+
+```sh
+bash scripts/build-macos.sh
+```
+
+To explicitly allow installing missing dependencies:
+
+```sh
+bash scripts/build-macos.sh --install-dependencies
+```
+
+[Homebrew](https://brew.sh) must already be installed. The opt-in flag permits
+installing/upgrading Go and installing pkgconf/libass. If Apple command-line
+tools are missing, it opens Apple's installer; complete installation and rerun.
+
+Both entry points build **only for the current native architecture**, not by
+cross-compiling. Go, the C toolchain and native libraries must match.
+FFmpeg is optional: decoder tests and the packaged-output probe run when the
+required FFmpeg tools are available and otherwise report a skip.
+Even without the installation flag, builds may download Go modules and
+packaging downloads license text; this is not an offline build mode.
+
+Results are written to `build/` and `dist/`. Each run creates a uniquely named
+package directory under `dist/`, plus a `.zip` (Windows) or `.tar.gz` (macOS)
+and a matching `.sha256` file. Existing successful packages are not deleted.
+Use the executable inside that directory; keep its accompanying libraries.
+Run `.\scripts\build-windows.cmd -?` or
+`bash scripts/build-macos.sh --help` for help.
+
+### Manual build (advanced)
+
 Requirements: Go 1.24+, a cgo-compatible C compiler, pkg-config and libass
 development files. Development on macOS ARM64 has been verified against
 libass 0.17.5. FFmpeg is optional at runtime and is used for independent tests.
 
-### macOS
+#### macOS
 
 ```sh
 brew install libass pkgconf
@@ -26,7 +93,7 @@ go build -trimpath -o pgs-converter ./cmd/pgs-converter
 Use a Go installation and Homebrew dependencies matching the target
 architecture. Setting `GOARCH` alone does not cross-compile C dependencies.
 
-### Windows
+#### Windows
 
 Use native Go plus MSYS2's **UCRT64** toolchain for x64, or **CLANGARM64** for
 ARM64. Install the matching compiler, libass and pkgconf packages. Add that
@@ -38,7 +105,8 @@ environment's `bin` directory to PATH, set `CGO_ENABLED=1`, select `CC=gcc`
 go build -trimpath -o pgs-converter.exe ./cmd/pgs-converter
 ```
 
-The four-target GitHub Actions workflow is configured to build and run tests on macOS
+The four-target GitHub Actions workflow runs these build-and-package entry
+points on macOS
 ARM64/x64 and Windows ARM64/x64, and prepares archives with shared native
 libraries. **Only macOS ARM64 has been run locally; the other targets and their
 packaging are not certified until their CI jobs and clean-machine checks pass.**

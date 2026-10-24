@@ -11,11 +11,78 @@
 
 ## 构建
 
+### 推荐：一条命令编译并打包
+
+在项目目录中执行以下命令即可。**无需再填写 `Binary`、`Prefix`、
+`Destination`**：脚本会识别本机架构、查找依赖、运行测试和检查、
+编译程序、收集动态库及许可证，并测试打包后的程序。
+
+**Windows：在 PowerShell 或命令提示符中运行**
+
+```powershell
+.\scripts\build-windows.cmd
+```
+
+默认只检查依赖，缺少依赖时会给出提示，**不会自动安装软件**。
+如果希望脚本帮助安装，可以显式允许：
+
+```powershell
+.\scripts\build-windows.cmd -InstallDependencies
+```
+
+此选项允许通过 winget 安装缺少的 Go/MSYS2，并通过 MSYS2 的 pacman
+安装对应的编译器、pkgconf 和 libass。自动安装 Go/MSYS2 时，
+系统需要已有微软的 **App Installer（应用安装程序）**，即能使用 `winget`。
+安装器可能请求管理员授权。安装完成或 MSYS2 核心更新后，
+如提示重新打开终端或重试，按提示操作后再次运行命令即可。
+
+如果 MSYS2 已安装在自定义位置，可以指定其根目录：
+
+```powershell
+.\scripts\build-windows.cmd -Msys2Root D:\tools\msys64
+```
+
+这里填写 MSYS2 根目录，而不是里面的 `ucrt64` 或 `clangarm64` 子目录。
+启动器仅对子 PowerShell 进程临时使用执行策略绕过，
+不会永久更改系统的执行策略。
+
+**macOS：在终端中运行**
+
+```sh
+bash scripts/build-macos.sh
+```
+
+允许安装缺少的依赖时使用：
+
+```sh
+bash scripts/build-macos.sh --install-dependencies
+```
+
+需要事先安装 [Homebrew](https://brew.sh)。显式安装选项允许安装或升级 Go，
+以及安装 pkgconf/libass。如果缺少 Apple 命令行工具，脚本会打开系统安装器；
+完成安装后重新运行即可。
+
+两个入口都只构建**当前本机架构**，不通过修改 `GOARCH` 交叉编译；
+Go、C 工具链及原生库的架构必须匹配。
+FFmpeg 不是必需依赖：相应工具可用时会执行独立解码测试及打包输出探测，
+不可用时会明确报告跳过。
+即使没有开启依赖安装，构建也可能下载 Go 模块，打包还需要下载许可证文本；
+默认模式不等于离线模式。
+
+中间编译文件放在 `build/`，可运行的完整程序包放在 `dist/`。
+每次运行都会生成唯一命名的包目录、Windows 的 `.zip` 或 macOS 的 `.tar.gz`
+压缩包，以及对应的 `.sha256` 校验文件，不会删除之前成功生成的程序包。
+使用包目录中的可执行文件时，请保留旁边的动态库。
+查看脚本帮助可运行 `.\scripts\build-windows.cmd -?`
+或 `bash scripts/build-macos.sh --help`。
+
+### 手动构建（进阶）
+
 需要 Go 1.24 或更高版本、支持 cgo 的 C 编译器、pkg-config 和 libass 开发文件。
 已在 macOS ARM64 上使用 libass 0.17.5 完成本地开发验证。
 转换程序运行时不依赖 FFmpeg；开发测试使用 FFmpeg 进行独立解码验证。
 
-### macOS
+#### macOS
 
 ```sh
 brew install libass pkgconf
@@ -26,7 +93,7 @@ go build -trimpath -o pgs-converter ./cmd/pgs-converter
 Go 和 Homebrew 依赖需要与目标架构一致。
 仅设置 `GOARCH` 并不能完成原生 C 依赖的交叉编译。
 
-### Windows
+#### Windows
 
 x64 使用 Windows 原生 Go 和 MSYS2 的 **UCRT64** 工具链；
 ARM64 使用 Windows 原生 Go 和 **CLANGARM64** 工具链。
@@ -43,8 +110,8 @@ ARM64 使用 Windows 原生 Go 和 **CLANGARM64** 工具链。
 go build -trimpath -o pgs-converter.exe ./cmd/pgs-converter
 ```
 
-GitHub Actions 已配置 macOS ARM64/x64 和 Windows ARM64/x64 四个目标的构建、
-测试及共享原生库打包流程。**目前只有 macOS ARM64 完成本地运行验证；
+GitHub Actions 已配置使用上述入口执行 macOS ARM64/x64 和 Windows ARM64/x64
+四个目标的构建、测试及共享原生库打包流程。**目前只有 macOS ARM64 完成本地运行验证；
 其他目标及其打包流程需要通过实际 CI 和干净环境测试后才能确认。**
 
 CI 使用软件包管理器提供的原生依赖，并记录已安装版本；

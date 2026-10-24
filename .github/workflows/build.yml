@@ -26,24 +26,15 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: brew install libass pkgconf ffmpeg
-      - run: go test ./... && go vet ./...
+      - name: Build, test and package
+        run: bash scripts/build-macos.sh
       - run: go test -race ./...
-      - run: go build -trimpath -ldflags "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${{ github.sha }}" -o build/pgs-converter ./cmd/pgs-converter
-      - run: bash scripts/bundle-macos.sh build/pgs-converter dist/pgs-converter-macos-${{ matrix.arch }}
-      - name: Test packaged converter without Homebrew library paths
-        run: |
-          dist/pgs-converter-macos-${{ matrix.arch }}/pgs-converter convert testdata/animated.ass --size 1280x720 --fps 24 -o "$RUNNER_TEMP/packaged.sup"
-          ffprobe -v error -show_streams "$RUNNER_TEMP/packaged.sup"
-      - run: |
-          cd dist
-          tar -czf pgs-converter-macos-${{ matrix.arch }}.tar.gz pgs-converter-macos-${{ matrix.arch }}
-          shasum -a 256 *.tar.gz > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
-            dist/SHA256SUMS
+            dist/*.sha256
 
   windows:
     strategy:
@@ -53,17 +44,11 @@ jobs:
           - runner: windows-latest
             arch: amd64
             msystem: UCRT64
-            prefix: ucrt64
             packages: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libass mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-ffmpeg
-            cc: gcc
-            objdump: objdump
           - runner: windows-11-arm
             arch: arm64
             msystem: CLANGARM64
-            prefix: clangarm64
             packages: mingw-w64-clang-aarch64-clang mingw-w64-clang-aarch64-libass mingw-w64-clang-aarch64-pkgconf mingw-w64-clang-aarch64-ffmpeg
-            cc: clang
-            objdump: llvm-objdump
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -77,29 +62,12 @@ jobs:
           msystem: ${{ matrix.msystem }}
           update: true
           install: ${{ matrix.packages }}
-      - name: Configure native toolchain
+      - name: Build, test and package
         shell: pwsh
-        run: |
-          "${{ steps.msys.outputs.msys2-location }}\${{ matrix.prefix }}\bin" >> $env:GITHUB_PATH
-          "CC=${{ matrix.cc }}" >> $env:GITHUB_ENV
-          "CGO_ENABLED=1" >> $env:GITHUB_ENV
-          "PKG_CONFIG_PATH=${{ steps.msys.outputs.msys2-location }}/${{ matrix.prefix }}/lib/pkgconfig" >> $env:GITHUB_ENV
-      - run: go test ./...
-      - run: go vet ./...
-      - run: go build -trimpath -ldflags "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${{ github.sha }}" -o build/pgs-converter.exe ./cmd/pgs-converter
-      - name: Bundle and smoke test
-        shell: pwsh
-        run: |
-          ./scripts/bundle-windows.ps1 -Binary build/pgs-converter.exe -Prefix "${{ steps.msys.outputs.msys2-location }}/${{ matrix.prefix }}" -Destination dist/pgs-converter-windows-${{ matrix.arch }} -Objdump ${{ matrix.objdump }}
-          & "dist/pgs-converter-windows-${{ matrix.arch }}/pgs-converter.exe" convert testdata/animated.ass --size 1280x720 --fps 24 -o "$env:RUNNER_TEMP/packaged.sup"
-          if ($LASTEXITCODE -ne 0) { throw "Packaged conversion failed" }
-          ffprobe -v error -show_streams "$env:RUNNER_TEMP/packaged.sup"
-          if ($LASTEXITCODE -ne 0) { throw "Packaged output failed to probe" }
-          Compress-Archive -Path dist/pgs-converter-windows-${{ matrix.arch }} -DestinationPath dist/pgs-converter-windows-${{ matrix.arch }}.zip
-          Get-FileHash dist/*.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS
+        run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}
           path: |
             dist/*.zip
-            dist/SHA256SUMS
+            dist/*.sha256
