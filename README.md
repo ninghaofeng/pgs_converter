@@ -45,6 +45,7 @@ For an existing nonstandard MSYS2 installation, add:
 Supply the MSYS2 root, not its `ucrt64` or `clangarm64` subdirectory.
 The launcher uses a process-scoped PowerShell execution-policy bypass; it does
 not permanently change the machine's policy.
+It uses built-in Windows PowerShell 5.1; installing PowerShell 7 is not required.
 
 **macOS (Terminal):**
 

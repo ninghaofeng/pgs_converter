@@ -62,6 +62,9 @@ jobs:
           msystem: ${{ matrix.msystem }}
           update: true
           install: ${{ matrix.packages }}
+      - name: Test Windows PowerShell compatibility
+        shell: powershell
+        run: ./scripts/test-build-windows.ps1
       - name: Build, test and package
         shell: pwsh
         run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}"

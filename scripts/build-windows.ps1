@@ -29,6 +29,19 @@ function Invoke-CheckedNative {
     }
 }
 
+function Get-WindowsArchitecture {
+    # WOW64/emulated shells expose the native architecture separately.
+    # Avoid RuntimeInformation properties absent in some Windows .NET runtimes.
+    $architecture = $env:PROCESSOR_ARCHITEW6432
+    if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
+    if (-not $architecture) { throw "Cannot detect the native Windows architecture from the process environment." }
+    switch ($architecture.ToLowerInvariant()) {
+        "amd64" { return "x64" }
+        "arm64" { return "arm64" }
+        default { throw "Unsupported Windows architecture: $architecture. Only x64 and ARM64 are supported." }
+    }
+}
+
 function Get-TargetConfiguration {
     param([string]$Architecture)
     switch ($Architecture.ToLowerInvariant()) {
@@ -108,7 +121,7 @@ function Invoke-WindowsBuild {
         throw "This script requires Windows. Use build-macos.sh on macOS."
     }
     $repo = Split-Path -Parent $PSScriptRoot
-    $target = Get-TargetConfiguration ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString())
+    $target = Get-TargetConfiguration (Get-WindowsArchitecture)
     # Resolve relative user paths before changing into the repository.
     $msys = Find-Msys2Root $RequestedRoot
     $minimumMatch = [regex]::Match((Get-Content -LiteralPath "$repo/go.mod" -Raw), '(?m)^go\s+(\d+\.\d+(?:\.\d+)?)\s*$')

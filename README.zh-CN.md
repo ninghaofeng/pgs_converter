@@ -45,6 +45,7 @@
 这里填写 MSYS2 根目录，而不是里面的 `ucrt64` 或 `clangarm64` 子目录。
 启动器仅对子 PowerShell 进程临时使用执行策略绕过，
 不会永久更改系统的执行策略。
+启动器使用系统自带的 Windows PowerShell 5.1，无需额外安装 PowerShell 7。
 
 **macOS：在终端中运行**
 

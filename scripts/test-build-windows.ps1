@@ -28,6 +28,33 @@ $arm = Get-TargetConfiguration "Arm64"
 Assert ($arm.Arch -eq "arm64" -and $arm.Prefix -eq "clangarm64" -and $arm.Objdump -eq "llvm-objdump.exe") "Incorrect ARM64 toolchain."
 Assert-Throws { Get-TargetConfiguration "x86" } "*Unsupported Windows architecture*"
 
+$savedArchitecture = $env:PROCESSOR_ARCHITECTURE
+$savedNativeArchitecture = $env:PROCESSOR_ARCHITEW6432
+try {
+    foreach ($case in @(
+        @{ Process = "AMD64"; Native = $null; Expected = "x64" },
+        @{ Process = "ARM64"; Native = $null; Expected = "arm64" },
+        @{ Process = "x86"; Native = "AMD64"; Expected = "x64" },
+        @{ Process = "AMD64"; Native = "ARM64"; Expected = "arm64" },
+        @{ Process = "x86"; Native = "ARM64"; Expected = "arm64" }
+    )) {
+        $env:PROCESSOR_ARCHITECTURE = $case.Process
+        $env:PROCESSOR_ARCHITEW6432 = $case.Native
+        $detected = Get-WindowsArchitecture
+        Assert ($detected -eq $case.Expected) "Incorrect native architecture for $($case.Process)/$($case.Native): $detected."
+        $configuration = Get-TargetConfiguration $detected
+        Assert ($configuration.Arch -in @("amd64", "arm64")) "Native architecture did not select a supported toolchain."
+    }
+    $env:PROCESSOR_ARCHITEW6432 = $null
+    $env:PROCESSOR_ARCHITECTURE = "x86"
+    Assert-Throws { Get-WindowsArchitecture } "*Unsupported Windows architecture*"
+    $env:PROCESSOR_ARCHITECTURE = $null
+    Assert-Throws { Get-WindowsArchitecture } "*Cannot detect the native Windows architecture*"
+} finally {
+    [System.Environment]::SetEnvironmentVariable("PROCESSOR_ARCHITECTURE", $savedArchitecture, "Process")
+    [System.Environment]::SetEnvironmentVariable("PROCESSOR_ARCHITEW6432", $savedNativeArchitecture, "Process")
+}
+
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("pgs-build-tests-" + [guid]::NewGuid().ToString("N"))
 try {
     $root = Join-Path $temp "MSYS2 with spaces"
