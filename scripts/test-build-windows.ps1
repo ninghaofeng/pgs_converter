@@ -24,12 +24,14 @@ foreach ($name in @("build-windows.ps1", "bundle-windows.ps1", "windows-static.p
 . "$PSScriptRoot/build-windows.ps1"
 $pkgConfigPath = "C:\MSYS2 with spaces\ucrt64\bin\pkg-config.exe"
 $sharedLink = Get-WindowsLinkConfiguration $pkgConfigPath
-$staticLink = Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic
+$staticLink = Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic -CxxLinker "g++.exe"
 Assert ($sharedLink.PkgConfig -eq '"C:/MSYS2 with spaces/ucrt64/bin/pkg-config.exe"') "pkg-config executable path was not quoted."
 Assert ($sharedLink.LinkerFlags -eq "" -and $sharedLink.BuildTags -eq "") "Shared linking gained static flags."
 Assert ($staticLink.PkgConfig -eq $sharedLink.PkgConfig) "PKG_CONFIG must not contain arguments that Go would discard."
 Assert ($staticLink.BuildTags -eq "pgs_static") "Static cgo directives were not enabled."
-Assert ($staticLink.LinkerFlags -eq "-linkmode=external -extldflags=-static") "Static external linker flags are missing."
+Assert ($staticLink.LinkerFlags -eq "-linkmode=external -extld=g++.exe -extldflags=-static") "Static linking must use the C++ driver and retain -static."
+Assert-Throws { Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic } "*requires the matching C++ driver*"
+Assert-Throws { Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic -CxxLinker "gcc.exe" } "*requires the matching C++ driver*"
 $allowedImports = @(
     "The Import Tables",
     "    DLL Name: KERNEL32.dll",
@@ -46,8 +48,12 @@ foreach ($dll in @("libass-9.dll", "libfreetype-6.dll", "libwinpthread-1.dll", "
 Assert-Throws { Assert-WindowsStaticImports @("not a PE import table") } "*no PE DLL imports*"
 $x64 = Get-TargetConfiguration "X64"
 Assert ($x64.Arch -eq "amd64" -and $x64.Prefix -eq "ucrt64" -and $x64.Compiler -eq "gcc.exe") "Incorrect x64 toolchain."
+Assert ($x64.CxxLinker -eq "g++.exe") "The UCRT64 C++ linker must match GCC."
 $arm = Get-TargetConfiguration "Arm64"
 Assert ($arm.Arch -eq "arm64" -and $arm.Prefix -eq "clangarm64" -and $arm.Objdump -eq "llvm-objdump.exe") "Incorrect ARM64 toolchain."
+Assert ($arm.CxxLinker -eq "clang++.exe") "The ARM64 C++ linker must match Clang."
+$armLink = Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic -CxxLinker $arm.CxxLinker
+Assert ($armLink.LinkerFlags -eq "-linkmode=external -extld=clang++.exe -extldflags=-static") "ARM64 must use the static Clang C++ driver, not GCC/libstdc++."
 Assert-Throws { Get-TargetConfiguration "x86" } "*Unsupported Windows architecture*"
 
 $savedArchitecture = $env:PROCESSOR_ARCHITECTURE

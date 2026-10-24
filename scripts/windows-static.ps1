@@ -1,14 +1,19 @@
 # Shared static-link configuration and PE import audit; no build side effects.
 function Get-WindowsLinkConfiguration {
-    param([string]$PkgConfig, [switch]$UseStatic)
+    param([string]$PkgConfig, [switch]$UseStatic, [string]$CxxLinker)
     $command = '"' + $PkgConfig.Replace("\", "/") + '"'
     $linkerFlags = ""
     $buildTags = ""
     if ($UseStatic) {
+        if ($CxxLinker -notin @("g++.exe", "clang++.exe")) {
+            throw "Static linking requires the matching C++ driver (g++.exe or clang++.exe)."
+        }
         # The tag enables cgo's --static pkg-config directive and -static
         # link flag. Go's PKG_CONFIG variable accepts an executable, not args.
         $buildTags = "pgs_static"
-        $linkerFlags = "-linkmode=external -extldflags=-static"
+        # Graphite2/HarfBuzz contain C++ code. The C++ driver adds its runtime
+        # after the dependency archives; CC remains the C compiler for cgo.
+        $linkerFlags = "-linkmode=external -extld=$CxxLinker -extldflags=-static"
     }
     return [pscustomobject]@{
         PkgConfig = $command

@@ -54,14 +54,14 @@ function Get-TargetConfiguration {
         "x64" {
             return [pscustomobject]@{
                 Arch = "amd64"; System = "UCRT64"; Prefix = "ucrt64"
-                Compiler = "gcc.exe"; Objdump = "objdump.exe"
+                Compiler = "gcc.exe"; CxxLinker = "g++.exe"; Objdump = "objdump.exe"
                 Packages = "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libass mingw-w64-ucrt-x86_64-pkgconf"
             }
         }
         "arm64" {
             return [pscustomobject]@{
                 Arch = "arm64"; System = "CLANGARM64"; Prefix = "clangarm64"
-                Compiler = "clang.exe"; Objdump = "llvm-objdump.exe"
+                Compiler = "clang.exe"; CxxLinker = "clang++.exe"; Objdump = "llvm-objdump.exe"
                 Packages = "pacman -S --needed --noconfirm mingw-w64-clang-aarch64-clang mingw-w64-clang-aarch64-libass mingw-w64-clang-aarch64-pkgconf"
             }
         }
@@ -166,6 +166,7 @@ function Invoke-WindowsBuild {
         }
         $prefix = Join-Path $msys $target.Prefix
         $required = @("bin/$($target.Compiler)", "bin/$($target.Objdump)", "bin/pkg-config.exe", "lib/pkgconfig/libass.pc")
+        if ($UseStatic) { $required += "bin/$($target.CxxLinker)" }
         $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $prefix $_) -PathType Leaf) })
         if ($missing.Count -gt 0) {
             if (-not $AllowInstall) {
@@ -194,7 +195,7 @@ function Invoke-WindowsBuild {
         $compiler = (Join-Path $prefix "bin/$($target.Compiler)").Replace("\", "/")
         $env:CC = '"' + $compiler + '"'
         $pkgConfig = Join-Path $prefix "bin/pkg-config.exe"
-        $link = Get-WindowsLinkConfiguration $pkgConfig -UseStatic:$UseStatic
+        $link = Get-WindowsLinkConfiguration $pkgConfig -UseStatic:$UseStatic -CxxLinker $target.CxxLinker
         $env:PKG_CONFIG = $link.PkgConfig
         $env:PKG_CONFIG_PATH = "$prefix/lib/pkgconfig;$prefix/share/pkgconfig"
         $env:PKG_CONFIG_LIBDIR = $env:PKG_CONFIG_PATH

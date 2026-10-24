@@ -95,6 +95,11 @@ required, but third-party renderer/compiler-runtime DLLs must not be imported.
 
 The build enables the Windows-only `pgs_static` cgo directives, requests
 `pkg-config --static` private dependencies, and forces static external linking.
+C compilation still uses GCC/Clang, but the final linker uses the matching
+`g++` (UCRT64) or `clang++` (CLANGARM64) driver so C++ dependencies such as
+Graphite2 receive their runtime libraries after the static dependency archives.
+The C++ driver is checked alongside the C compiler and is supplied by the same
+MSYS2 compiler package; the static DLL-import audit remains mandatory.
 Matching static `.a` libraries for the entire dependency chain are required;
 an import library ending in `.dll.a` is not a substitute. Missing libraries or
 unresolved symbols fail the build, with no fallback to the DLL version.
