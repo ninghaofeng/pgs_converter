@@ -63,7 +63,8 @@ function Assert-WindowsStaticImports {
     )
     $imports = @(
         foreach ($line in $Lines) {
-            if ($line -match 'DLL Name:\s*(\S+)') { $Matches[1] }
+            # LLVM's "DLL name:" identifies the export module, not an import.
+            if ($line -cmatch '^\s*DLL Name:\s*(.*)$') { $Matches[1].Trim() }
         }
     ) | Sort-Object -Unique
     if (-not $imports) {

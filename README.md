@@ -205,6 +205,8 @@ only the EXE to a temporary directory and converts SRT and animated ASS with
 MSYS2 removed from PATH. `PE-IMPORTS.txt` records the audit result and
 `MSYS2-PACKAGES.txt` records installed package versions. An unknown
 import fails explicitly even if that DLL happens to exist in System32.
+Both GNU and LLVM objdump output are supported; LLVM export-table module names
+(such as `a.out.exe`) are not mistaken for imported dependencies.
 
 On macOS, the build generates a self-contained `libass.pc` that replaces each
 third-party `-l...` with its explicit static `.a` path, retaining only SDK system

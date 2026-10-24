@@ -198,6 +198,8 @@ C++ 驱动会与 C 编译器一起检查，由同一个 MSYS2 编译器软件包
 实际转换 SRT 和动画 ASS。审计结果保存在 `PE-IMPORTS.txt`，
 已安装的软件包版本记录在 `MSYS2-PACKAGES.txt`。
 即使某个未知 DLL 恰好位于 System32，也会明确失败，不会默认为系统依赖。
+审计兼容 GNU 和 LLVM objdump，不会将 LLVM 导出表中的自身模块名
+（例如 `a.out.exe`）误判为外部依赖。
 
 macOS 会生成独立的 `libass.pc`，将第三方 `-l...` 参数替换为明确的静态 `.a`
 路径，仅保留 SDK 中的系统库和 Framework 动态链接。

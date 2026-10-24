@@ -40,6 +40,17 @@ $allowedImports = @(
 )
 $audited = @(Assert-WindowsStaticImports $allowedImports)
 Assert ($audited.Count -eq 6) "System imports were not retained in audit output."
+$llvmOutput = $allowedImports + @(
+    "Export Table:",
+    " DLL name: a.out.exe",
+    " Ordinal base: 1",
+    " DLL name: exported-module.dll"
+)
+$llvmAudited = @(Assert-WindowsStaticImports $llvmOutput)
+Assert ($llvmAudited.Count -eq 6) "LLVM export module names were incorrectly treated as DLL imports."
+Assert-Throws { Assert-WindowsStaticImports @("Export Table:", " DLL name: a.out.exe") } "*no PE DLL imports*"
+Assert-Throws { Assert-WindowsStaticImports ($allowedImports + " DLL Name: a.out.exe") } "*non-allowlisted DLL*"
+Assert-Throws { Assert-WindowsStaticImports ($allowedImports + " DLL Name: KERNEL32.dll unexpected.dll") } "*non-allowlisted DLL*"
 foreach ($dll in @("libass-9.dll", "libfreetype-6.dll", "libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libGLESv2.dll", "libEGL.dll", "msvcp140.dll", "unknown.dll", "../kernel32.dll")) {
     Assert-Throws { Assert-WindowsStaticImports ($allowedImports + "DLL Name: $dll") } "*non-allowlisted DLL*"
 }
