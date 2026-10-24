@@ -63,6 +63,18 @@ func TestDesktopTargetPackages(t *testing.T) {
 	}
 }
 
+func TestWindowsNativePickerCompilation(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		t.Run(arch, func(t *testing.T) {
+			cmd := exec.Command("go", "test", "-c", "-o", filepath.Join(t.TempDir(), "nativepicker.test.exe"), "../nativepicker")
+			cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+arch, "CGO_ENABLED=0")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("native Windows picker cannot compile: %v: %s", err, output)
+			}
+		})
+	}
+}
+
 func scriptPath(t *testing.T, name string) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("..", "..", "scripts", name))

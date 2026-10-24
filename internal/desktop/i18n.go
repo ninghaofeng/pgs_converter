@@ -117,7 +117,13 @@ func (w *window) setLanguage(code string) {
 }
 
 var translations = map[string]string{
-	"Language":                               "界面语言",
+	"Choose subtitle files":                                          "选择字幕文件",
+	"Could not open the system file selection panel: %v":             "无法打开系统文件选择面板：%v",
+	"The system file selection panel returned an invalid selection.": "系统文件选择面板返回了无效的选择。",
+	"Language":                 "界面语言",
+	"UI scale":                 "界面缩放",
+	"Unsupported UI scale: %s": "不支持的界面缩放：%s",
+	"Unsupported saved UI scale %d%%; using 100%%.": "保存的界面缩放 %d%% 不受支持；已使用 100%%。",
 	"Choose...":                              "请选择…",
 	"Add file":                               "添加文件",
 	"Add folder":                             "添加文件夹",

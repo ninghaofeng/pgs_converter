@@ -254,7 +254,7 @@ mkdir -p "$build_dir" "$repo_root/dist"
 go build -trimpath -ldflags "$link_flags -X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" -o "$build_dir/pgs-converter" ./cmd/pgs-converter
 bundle_macos "$build_dir/pgs-converter" "$destination" "$metadata"
 if "$build_gui"; then
-    app="$destination/PGS Converter.app"
+    app="$destination/PGS-Converter.app"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     gui_binary="$app/Contents/MacOS/pgs-converter-gui"
     go build -trimpath -ldflags "$link_flags -X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" \

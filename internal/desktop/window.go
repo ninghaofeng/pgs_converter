@@ -17,11 +17,11 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/lang"
-	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/ninghaofeng/pgs_converter/internal/batch"
 	"github.com/ninghaofeng/pgs_converter/internal/convert"
+	"github.com/ninghaofeng/pgs_converter/internal/nativepicker"
 	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
 )
 
@@ -44,12 +44,17 @@ type window struct {
 	closing        bool
 	cancel         context.CancelFunc
 	previewCancel  context.CancelFunc
+	pickerCancel   context.CancelFunc
+	openPicker     func(context.Context, fyne.Window, nativepicker.Request, func([]string, error))
 	previewID      int
 	previewGate    chan struct{}
 	intervals      []subtitle.Interval
 	logLines       []string
 	language       string
 	languagePicker *widget.Select
+	uiScale        int
+	scalePicker    *widget.Select
+	timestampBox   *fyne.Container
 	messages       map[*widget.Label]message
 	translators    []func()
 
@@ -67,9 +72,15 @@ type window struct {
 }
 
 func New(a fyne.App, version string, inputs ...string) fyne.Window {
-	w := &window{app: a, win: a.NewWindow("PGS Converter " + version), selected: -1, previewGate: make(chan struct{}, 1)}
+	w := &window{app: a, win: a.NewWindow("PGS Converter"), selected: -1, previewGate: make(chan struct{}, 1)}
 	var languageErr error
 	w.language, languageErr = initialLanguage(a.Preferences().String("desktop-language"), lang.SystemLocale().String())
+	w.uiScale = a.Preferences().IntWithFallback("desktop-ui-scale", 100)
+	var scaleErr error
+	if !slices.Contains(uiScalePercentages, w.uiScale) {
+		scaleErr = uiError("Unsupported saved UI scale %d%%; using 100%%.", w.uiScale)
+		w.uiScale = 100
+	}
 	config := Defaults()
 	var settingsErr error
 	if saved := a.Preferences().String("desktop-settings"); saved != "" {
@@ -109,6 +120,9 @@ func New(a fyne.App, version string, inputs ...string) fyne.Window {
 		if w.previewCancel != nil {
 			w.previewCancel()
 		}
+		if w.pickerCancel != nil {
+			w.pickerCancel()
+		}
 		w.previewID++
 		w.win.SetCloseIntercept(nil)
 		w.win.Close()
@@ -118,6 +132,9 @@ func New(a fyne.App, version string, inputs ...string) fyne.Window {
 	}
 	if languageErr != nil {
 		w.showError(languageErr)
+	}
+	if scaleErr != nil {
+		w.showError(scaleErr)
 	}
 	if len(inputs) > 0 {
 		w.add(inputs)
@@ -146,6 +163,7 @@ func (w *window) build(c Config) {
 	if w.language == "" {
 		w.language = english
 	}
+	w.buildScalePicker()
 	selectedLanguage := "English"
 	if w.language == chinese {
 		selectedLanguage = "简体中文"
@@ -223,25 +241,15 @@ func (w *window) build(c Config) {
 		w.say(w.previewStatus, "Use First subtitle or enter an exact time. Preview is SDR style only.")
 	}
 	addFile := w.button("Add file", func() {
-		d := dialog.NewFileOpen(func(file fyne.URIReadCloser, err error) {
-			if err != nil {
-				w.showError(err)
-			} else if file != nil {
-				path := file.URI().Path()
-				if err := file.Close(); err != nil {
-					w.showError(err)
-					return
-				}
-				w.add([]string{path})
-			}
-		}, w.win)
-		d.SetFilter(storage.NewExtensionFileFilter([]string{".srt", ".ass", ".ssa"}))
-		d.SetTitleText(w.tr("Choose subtitle file"))
-		d.SetConfirmText(w.tr("Open"))
-		d.SetDismissText(w.tr("Cancel"))
-		d.Show()
+		if !w.busy() {
+			w.selectPaths(false, w.add)
+		}
 	})
-	addFolder := w.button("Add folder", func() { w.chooseFolder(func(path string) { w.add([]string{path}) }) })
+	addFolder := w.button("Add folder", func() {
+		if !w.busy() {
+			w.chooseFolder(func(path string) { w.add([]string{path}) })
+		}
+	})
 	remove := w.button("Remove selected", func() {
 		if w.busy() || w.selected < 0 {
 			return
@@ -268,6 +276,7 @@ func (w *window) build(c Config) {
 		w.detail, nil, nil, w.list)
 	form := widget.NewForm(
 		w.formItem("Language", w.languagePicker),
+		w.formItem("UI scale", w.scalePicker),
 		w.formItem("Resolution", w.size),
 		w.formItem("Exact FPS", w.fps),
 		w.formItem("Color profile", w.profile),
@@ -296,9 +305,10 @@ func (w *window) build(c Config) {
 	first := w.button("First subtitle", func() { w.preview(true) })
 	previous := w.button("Previous", func() { w.navigate(-1) })
 	next := w.button("Next", func() { w.navigate(1) })
+	w.timestampBox = container.NewGridWrap(w.timestampSize(), w.timestamp)
 	preview := container.NewBorder(
 		container.NewVBox(w.previewStatus, container.NewHBox(w.label("Time (ms)"),
-			container.NewGridWrap(fyne.NewSize(140, w.timestamp.MinSize().Height), w.timestamp), w.previewButton, first, previous, next)),
+			w.timestampBox, w.previewButton, first, previous, next)),
 		nil, nil, nil, container.NewStack(canvas.NewRectangle(color.Black), w.previewImage))
 	logPanel := container.NewBorder(container.NewHBox(w.button("Copy log", func() {
 		w.app.Clipboard().SetContent(strings.Join(w.logLines, "\n"))
@@ -336,17 +346,7 @@ func (w *window) config() Config {
 }
 
 func (w *window) chooseFolder(accept func(string)) {
-	d := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
-		if err != nil {
-			w.showError(err)
-		} else if uri != nil {
-			accept(uri.Path())
-		}
-	}, w.win)
-	d.SetTitleText(w.tr("Choose folder"))
-	d.SetConfirmText(w.tr("Select folder"))
-	d.SetDismissText(w.tr("Cancel"))
-	d.Show()
+	w.selectPaths(true, func(paths []string) { accept(paths[0]) })
 }
 
 func (w *window) showError(err error) {
@@ -569,6 +569,9 @@ func (w *window) finish(cancelled bool) {
 	if w.closing {
 		if w.previewCancel != nil {
 			w.previewCancel()
+		}
+		if w.pickerCancel != nil {
+			w.pickerCancel()
 		}
 		w.win.SetCloseIntercept(nil)
 		w.win.Close()

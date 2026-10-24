@@ -44,7 +44,7 @@ func TestTranslationCoverageAndFormats(t *testing.T) {
 			t.Errorf("translation has missing text or mismatched format arguments: %q -> %q", key, value)
 		}
 	}
-	for _, name := range []string{"window.go", "config.go"} {
+	for _, name := range []string{"window.go", "config.go", "scale.go", "picker.go"} {
 		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
 		if err != nil {
 			t.Fatal(err)

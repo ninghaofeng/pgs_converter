@@ -16,7 +16,7 @@ scheduler. It uses Go widgets, not a WebView; Node.js, a browser and WebView2
 are not required. CLI commands and default CLI-only packaging are unchanged.
 
 ```sh
-# macOS: package the CLI and PGS Converter.app together
+# macOS: package the CLI and PGS-Converter.app together
 bash scripts/build-macos.sh --gui
 ```
 
@@ -26,7 +26,7 @@ bash scripts/build-macos.sh --gui
 ```
 
 Add the existing dependency-install option if needed. On macOS, open the
-generated `PGS Converter.app`; on Windows, open `pgs-converter-gui.exe`.
+generated `PGS-Converter.app`; on Windows, open `pgs-converter-gui.exe`.
 The macOS bundle is ad-hoc signed for development, not Developer ID signed or
 notarized. Public distribution still requires platform signing/release checks.
 
@@ -38,8 +38,16 @@ preview. The choice is saved immediately, independently of conversion settings.
 You can also launch the GUI with `-language en` or `-language zh-CN`.
 Application controls, statuses, preview explanations, validation messages and
 application dialogs follow this selection. Original engine/libass diagnostics
-and existing log entries are preserved; toolkit-internal file-picker text may
-still follow the operating system locale.
+and existing log entries are preserved. Native file-picker controls follow the
+operating system's language and appearance.
+
+**UI scale**, directly below Language, adjusts interface text, icons and control
+spacing immediately. Choices are 75%, 80%, 90%, 100%, 110%, 125% and 150%;
+the default is 100%, preserving the existing appearance. Try 80% or 90% for a
+more compact interface. The choice is saved immediately for the next launch,
+independently of conversion settings, and combines with the system's display
+scaling. It does not change subtitle font sizes, preview rendering or SUP output,
+and can be changed while converting.
 
 The interface supports file/folder drag and drop,
 recursive discovery, removing queued files, resolution and exact rational FPS,
@@ -48,7 +56,15 @@ folders, SRT font/size/margin, output folder, overwrite protection, concurrency,
 per-file progress, cancellation and copyable diagnostics. Valid settings are
 remembered between runs. Output is flat: equal basenames are blocked before
 conversion; the CLI still preserves relative paths for directory batches.
-Fyne's file/folder dialogs are used, not OS-native picker panels.
+File and folder selection uses **OS-native panels** on macOS and Windows,
+including subtitle inputs (multiple files), input folders, output folders and
+font folders. macOS uses an AppKit `NSOpenPanel` sheet attached to the app window;
+it does not run AppleScript or require Automation/Accessibility permissions.
+Windows uses the system file dialog attached to the app window. Cancelling a
+panel leaves the queue and settings unchanged; failures are reported explicitly.
+These panels follow system display scaling rather than the application's UI
+scale. Only system frameworks/DLLs are used; no extra third-party dynamic
+libraries or external dialog programs are required.
 
 Select a file and use **First subtitle**, **Render at time**, **Previous** or
 **Next**. Time is integer milliseconds. Preview renders at the selected canvas

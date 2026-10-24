@@ -14,6 +14,16 @@ import (
 	"github.com/ninghaofeng/pgs_converter/internal/convert"
 )
 
+func TestWindowTitle(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	win := New(a, "dev-build-version")
+	defer win.Close()
+	if win.Title() != "PGS Converter" {
+		t.Fatalf("unexpected application title: %q", win.Title())
+	}
+}
+
 func TestConfig(t *testing.T) {
 	c := Defaults()
 	c.Size = "3840x2160"
