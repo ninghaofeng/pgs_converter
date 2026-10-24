@@ -1,0 +1,272 @@
+package convert
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"image"
+	"image/color"
+	"image/draw"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"testing"
+
+	"github.com/ninghaofeng/pgs_converter/internal/colorx"
+	"github.com/ninghaofeng/pgs_converter/internal/render"
+	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
+)
+
+func options() Options {
+	rate, _ := subtitle.ParseRate("24")
+	profile, _ := colorx.New("sdr", 203)
+	return Options{Width: 640, Height: 360, Rate: rate, Profile: profile, Style: subtitle.Style{Font: "sans-serif", Size: 28, Margin: 20}}
+}
+
+func compositions(t *testing.T, data []byte) []struct {
+	pts   uint32
+	count byte
+} {
+	t.Helper()
+	var out []struct {
+		pts   uint32
+		count byte
+	}
+	for len(data) > 0 {
+		if len(data) < 13 {
+			t.Fatal("truncated SUP")
+		}
+		n := int(binary.BigEndian.Uint16(data[11:13]))
+		if len(data) < 13+n {
+			t.Fatal("truncated payload")
+		}
+		if data[10] == 0x16 {
+			out = append(out, struct {
+				pts   uint32
+				count byte
+			}{binary.BigEndian.Uint32(data[2:6]), data[23]})
+		}
+		data = data[13+n:]
+	}
+	return out
+}
+
+func TestStreamTimingAndClear(t *testing.T) {
+	var buf bytes.Buffer
+	result, err := Stream(context.Background(), "../../testdata/sample.srt", &buf, options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sets := compositions(t, buf.Bytes())
+	if len(sets) != 4 || result.Frames != 4 {
+		t.Fatalf("expected four static updates, got %d: %+v", result.Frames, sets)
+	}
+	want := []uint32{48750, 90000, 138750, 180000}
+	for i, v := range sets {
+		if v.pts != want[i] {
+			t.Errorf("set %d: %d want %d", i, v.pts, want[i])
+		}
+	}
+	if sets[len(sets)-1].count != 0 {
+		t.Fatal("missing final clear")
+	}
+}
+
+func TestSafeOutput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.sup")
+	original := []byte("existing")
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := File(context.Background(), "../../testdata/sample.srt", path, options()); err == nil {
+		t.Fatal("overwrote without permission")
+	}
+	opt := options()
+	opt.Overwrite = true
+	if _, err := File(context.Background(), filepath.Join(dir, "missing.srt"), path, opt); err == nil {
+		t.Fatal("missing input succeeded")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatal("failed conversion changed existing output")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := File(ctx, "../../testdata/sample.srt", path, opt); err == nil {
+		t.Fatal("ignored cancellation")
+	}
+	if _, err := File(context.Background(), "../../testdata/sample.srt", path, opt); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("left temporary files: %v %v", entries, err)
+	}
+}
+
+func TestMissingGlyphDiagnostics(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "missing-glyph.srt")
+	if err := os.WriteFile(input, []byte("1\n00:00:00,000 --> 00:00:01,000\n\U0010ffff"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	opt := options()
+	opt.Strict = true
+	result, err := Stream(context.Background(), input, &bytes.Buffer{}, opt)
+	if err == nil || len(result.Warnings) == 0 {
+		t.Fatalf("missing glyph was not diagnosed in strict mode: %v %v", result, err)
+	}
+}
+
+func TestInvisibleStrictAndHDR(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "short.srt")
+	if err := os.WriteFile(input, []byte("1\n00:00:00,001 --> 00:00:00,002\nx"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	opt := options()
+	opt.Strict = true
+	if _, err := Stream(context.Background(), input, &bytes.Buffer{}, opt); err == nil {
+		t.Fatal("strict mode accepted invisible event")
+	}
+	opt = options()
+	opt.Profile, _ = colorx.New("hdr10", 203)
+	var first, second bytes.Buffer
+	if _, err := Stream(context.Background(), "../../testdata/sample.srt", &first, opt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Stream(context.Background(), "../../testdata/sample.srt", &second, opt); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first.Bytes(), second.Bytes()) {
+		t.Fatal("HDR output is nondeterministic")
+	}
+	var sdr bytes.Buffer
+	if _, err := Stream(context.Background(), "../../testdata/sample.srt", &sdr, options()); err != nil {
+		t.Fatal(err)
+	}
+	hdrData, sdrData := first.Bytes(), sdr.Bytes()
+	whiteFound := false
+	for len(hdrData) > 0 {
+		n := int(binary.BigEndian.Uint16(hdrData[11:13]))
+		if n != int(binary.BigEndian.Uint16(sdrData[11:13])) {
+			t.Fatal("profile changed segment dimensions")
+		}
+		a, b := hdrData[13:13+n], sdrData[13:13+n]
+		if hdrData[10] == 0x14 {
+			for i := 2; i < n; i += 5 {
+				if a[i] != b[i] || a[i+4] != b[i+4] {
+					t.Fatal("HDR changed palette indices or transparency")
+				}
+				if b[i+1] == 235 && b[i+2] == 128 && b[i+3] == 128 && b[i+4] == 255 {
+					whiteFound = true
+					if a[i+1] != 143 || a[i+2] != 128 || a[i+3] != 128 {
+						t.Fatalf("HDR reference white is not 203 nits: %v", a[i:i+5])
+					}
+				}
+			}
+		} else if !bytes.Equal(a, b) {
+			t.Fatal("color profile changed geometry, RLE or timing")
+		}
+		hdrData, sdrData = hdrData[13+n:], sdrData[13+n:]
+	}
+	if !whiteFound {
+		t.Fatal("reference fixture has no opaque white")
+	}
+}
+
+func TestFFmpegDecode(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("independent decoder unavailable: install FFmpeg to run interoperability test")
+	}
+	output := filepath.Join(t.TempDir(), "animated.sup")
+	opt := options()
+	// FFmpeg guesses BT.601 for <=576-line subtitles. Use HD here so its
+	// independent decoder interprets this encoder's BT.709 palette as intended.
+	opt.Width, opt.Height = 1280, 720
+	result, err := File(context.Background(), "../../testdata/animated.ass", output, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Frames < 30 {
+		t.Fatalf("animation was lost: %d updates", result.Frames)
+	}
+	mkv := filepath.Join(t.TempDir(), "subtitles.mkv")
+	// Copy timestamps: normalizing the subtitle's first PTS to zero would hide
+	// timing errors and shift it relative to the synthetic background video.
+	mux := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-copyts", "-i", output, "-map", "0:s:0", "-c:s", "copy", mkv)
+	if log, err := mux.CombinedOutput(); err != nil {
+		t.Fatalf("independent MKV mux: %v: %s", err, log)
+	}
+	demux := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-copyts", "-i", mkv, "-map", "0:s:0", "-c:s", "copy", "-f", "sup", "pipe:1")
+	if data, err := demux.Output(); err != nil || len(compositions(t, data)) != result.Frames {
+		t.Fatalf("MKV roundtrip lost compositions: %v", err)
+	}
+	// Select representative fade/movement, overlap, gap and drawing frames.
+	// RGB overlay avoids adding chroma subsampling error to the palette check.
+	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-copyts", "-f", "lavfi", "-i", "color=black:s=1280x720:r=24:d=4,format=rgba",
+		"-i", output, "-filter_complex", "[0:v][1:s]overlay=format=rgb,select='eq(n,0)+eq(n,18)+eq(n,30)+eq(n,48)+eq(n,64)+eq(n,77)+eq(n,90)'",
+		"-t", "4", "-fps_mode", "passthrough", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	raw, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("independent decode: %v: %s", err, stderr.String())
+	}
+	frameSize := 1280 * 720 * 4
+	if len(raw) != 7*frameSize {
+		t.Fatalf("decoded %d bytes, expected %d", len(raw), 7*frameSize)
+	}
+	script, err := os.ReadFile("../../testdata/animated.ass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := render.New(1280, 720, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := r.Load(string(script)); err != nil {
+		t.Fatal(err)
+	}
+	for index, frame := range []int{0, 18, 30, 48, 64, 77, 90} {
+		t.Run(strconv.Itoa(frame), func(t *testing.T) {
+			im, _, err := r.Frame(int64((frame*1000 + 23) / 24))
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := image.NewRGBA(image.Rect(0, 0, 1280, 720))
+			draw.Draw(expected, expected.Rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
+			if im != nil {
+				draw.Draw(expected, im.Rect, im, im.Rect.Min, draw.Over)
+			}
+			decoded := raw[index*frameSize : (index+1)*frameSize]
+			total, maxError, active := 0, 0, 0
+			for i := 0; i < frameSize; i += 4 {
+				for c := 0; c < 3; c++ {
+					d := int(decoded[i+c]) - int(expected.Pix[i+c])
+					if d < 0 {
+						d = -d
+					}
+					total += d
+					maxError = max(maxError, d)
+				}
+				if expected.Pix[i] != 0 || expected.Pix[i+1] != 0 || expected.Pix[i+2] != 0 {
+					active++
+				}
+			}
+			// Normalize against active source pixels, not the large black canvas,
+			// which would otherwise hide missing, displaced or incorrectly colored text.
+			// Blank frames require exact black to catch failed clearing.
+			t.Logf("active=%d mean-error=%g peak-error=%d", active, float64(total)/float64(max(active*3, 1)), maxError)
+			if active == 0 {
+				if maxError != 0 {
+					t.Fatalf("subtitle residue on blank frame: peak=%d", maxError)
+				}
+			} else if mean := float64(total) / float64(active*3); mean > 2 || maxError > 16 {
+				t.Fatalf("decode/source mismatch: mean=%g peak=%d", mean, maxError)
+			}
+		})
+	}
+}

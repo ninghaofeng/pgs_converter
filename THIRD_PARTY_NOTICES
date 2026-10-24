@@ -1,0 +1,36 @@
+Third-party components
+======================
+
+This project calls libass through cgo. Binary redistributors must include
+the applicable license notices for every native library shipped in a package.
+The packaging scripts collect installed notices; the resulting archive must
+be audited before public redistribution. No font files are bundled.
+
+Direct Go dependencies (versions are recorded in go.mod and go.sum):
+
+* github.com/spf13/pflag: BSD-3-Clause
+  https://github.com/spf13/pflag/blob/master/LICENSE
+* golang.org/x/text: BSD-3-Clause; some data files have additional notices
+  https://go.googlesource.com/text/+/refs/heads/master/LICENSE
+
+Native renderer and common transitive components:
+
+* libass: ISC
+  https://github.com/libass/libass/blob/master/COPYING
+* FreeType: FreeType License or GPL-2.0; use the FreeType License option
+  https://freetype.org/license.html
+  Portions of this software are copyright (c) The FreeType Project
+  (https://freetype.org/). All rights reserved.
+* HarfBuzz: MIT-style; see its complete COPYING file
+  https://github.com/harfbuzz/harfbuzz/blob/main/COPYING
+* FriBidi: LGPL-2.1-or-later
+  https://github.com/fribidi/fribidi/blob/master/COPYING
+
+The exact native dependency graph depends on the platform and installed
+packages. Build information is included in generated packages. Shared native
+libraries are retained rather than hiding LGPL components inside a static
+executable. Before release, verify the applicable source/relinking obligations
+and provide corresponding source or a compliant source offer as required.
+
+FFmpeg is used only for development tests and is not bundled by this project.
+Its own license depends on its build configuration.

@@ -1,0 +1,29 @@
+# Build and release outputs
+/build/
+/dist/
+/bin/
+/pgs-converter
+/pgs-converter.exe
+*.test
+*.test.exe
+
+# Test coverage and profiling
+/coverage/
+/coverage.out
+/coverage.html
+*.prof
+
+# Generated subtitles and temporary conversion files
+*.sup
+!/testdata/**/*.sup
+.pgs-converter-*.tmp
+
+# Local logs, editor backups and OS metadata
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
