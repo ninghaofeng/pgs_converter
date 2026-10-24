@@ -27,8 +27,11 @@ jobs:
           cache: true
       - run: brew install libass pkgconf ffmpeg
       - name: Build, test and package
-        run: bash scripts/build-macos.sh
-      - run: go test -race ./...
+        run: bash scripts/build-macos.sh --install-dependencies
+      - run: |
+          export PKG_CONFIG_PATH="$PWD/build/native/macos-${{ matrix.arch }}/pkgconfig"
+          export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
+          go test -race -ldflags "-linkmode=external -extld=/usr/bin/clang++" ./...
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
@@ -56,21 +59,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Test Windows PowerShell compatibility
+        shell: powershell
+        run: ./internal/buildscripts/testdata/windows.ps1
       - uses: msys2/setup-msys2@v2
         id: msys
         with:
           msystem: ${{ matrix.msystem }}
           update: true
           install: ${{ matrix.packages }}
-      - name: Test Windows PowerShell compatibility
-        shell: powershell
-        run: ./scripts/test-build-windows.ps1
-      - name: Build, test and package
-        shell: pwsh
-        run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}"
       - name: Build, audit and test standalone static executable
         shell: pwsh
-        run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}" -Static
+        run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}

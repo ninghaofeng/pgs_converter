@@ -1,4 +1,4 @@
-package scripts_test
+package buildscripts_test
 
 import (
 	"encoding/json"
@@ -10,17 +10,16 @@ import (
 	"testing"
 )
 
-func TestWindowsStaticCgoConfiguration(t *testing.T) {
+func TestStaticCgoConfiguration(t *testing.T) {
 	for _, tc := range []struct {
-		os, tags string
-		static   bool
+		os     string
+		static bool
 	}{
-		{"windows", "", false},
-		{"windows", "pgs_static", true},
-		{"darwin", "pgs_static", false},
+		{"windows", true},
+		{"darwin", false},
 	} {
-		t.Run(tc.os+"/"+tc.tags, func(t *testing.T) {
-			cmd := exec.Command("go", "list", "-json", "-tags", tc.tags, "../internal/render")
+		t.Run(tc.os, func(t *testing.T) {
+			cmd := exec.Command("go", "list", "-json", "../render")
 			cmd.Env = append(os.Environ(), "GOOS="+tc.os, "GOARCH=amd64", "CGO_ENABLED=1")
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -42,7 +41,7 @@ func TestWindowsStaticCgoConfiguration(t *testing.T) {
 				return false
 			}
 			if !has(pkg.CgoPkgConfig, "libass") ||
-				has(pkg.CgoPkgConfig, "--static") != tc.static ||
+				!has(pkg.CgoPkgConfig, "--static") ||
 				has(pkg.CgoLDFLAGS, "-static") != tc.static {
 				t.Fatalf("incorrect cgo link mode: %+v", pkg)
 			}
@@ -52,11 +51,57 @@ func TestWindowsStaticCgoConfiguration(t *testing.T) {
 
 func scriptPath(t *testing.T, name string) string {
 	t.Helper()
-	path, err := filepath.Abs(name)
+	path, err := filepath.Abs(filepath.Join("..", "..", "scripts", name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestBuildScriptLayout(t *testing.T) {
+	entries, err := os.ReadDir(scriptPath(t, "."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"build-macos.sh", "build-windows.cmd", "build-windows.ps1"}
+	if len(entries) != len(want) {
+		t.Fatalf("scripts must contain only the three build entry points, got %v", entries)
+	}
+	for i, entry := range entries {
+		if entry.IsDir() || entry.Name() != want[i] {
+			t.Fatalf("unexpected scripts entry: %s, want %s", entry.Name(), want[i])
+		}
+	}
+}
+
+func TestMacRejectsDynamicPackages(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS Mach-O audit")
+	}
+	for _, dependency := range []string{"@rpath/libass.dylib", "/opt/homebrew/lib/libass.dylib", "/usr/local/lib/libass.dylib", ""} {
+		t.Run(dependency, func(t *testing.T) {
+			root := t.TempDir()
+			tool := filepath.Join(root, "otool")
+			text := "#!/bin/sh\nprintf 'binary:\\n'\n"
+			if dependency != "" {
+				text += "printf '\\t" + dependency + " (compatibility version 1.0.0, current version 1.0.0)\\n'\n"
+			}
+			if err := os.WriteFile(tool, []byte(text), 0755); err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, "package")
+			cmd := exec.Command("/bin/bash", "-c", `source "$1"; bundle_macos "$2" "$3" "$4"`,
+				"bundle-test", scriptPath(t, "build-macos.sh"), filepath.Join(root, "binary"), destination, root)
+			cmd.Env = append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"))
+			output, err := cmd.CombinedOutput()
+			if err == nil || (!strings.Contains(string(output), "non-system") && !strings.Contains(string(output), "cannot verify")) {
+				t.Fatalf("accepted unverified/dynamic executable: %v: %s", err, output)
+			}
+			if _, err := os.Stat(destination); !os.IsNotExist(err) {
+				t.Fatalf("failed audit created a success-shaped package: %v", err)
+			}
+		})
+	}
 }
 
 func TestMacBuildArguments(t *testing.T) {
@@ -149,7 +194,11 @@ func TestPowerShellBuildHelpers(t *testing.T) {
 	if shell == "" {
 		t.Skip("PowerShell unavailable; Windows CI runs syntax and helper tests")
 	}
-	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath(t, "test-build-windows.ps1"))
+	testScript, err := filepath.Abs(filepath.Join("testdata", "windows.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", testScript)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("PowerShell syntax/helper checks: %v: %s", err, output)
 	}
@@ -164,12 +213,18 @@ func TestMacKeepsDefaultPkgConfigPaths(t *testing.T) {
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "lib/libgraphite2.a"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
 	tools := map[string]string{
-		"brew": "#!/bin/sh\n[ \"$1\" = --prefix ] || exit 42\nprintf '%s\\n' \"$PGS_TEST_PREFIX\"\n",
+		"brew": "#!/bin/sh\ncase \"$1\" in --prefix|--cellar) printf '%s\\n' \"$PGS_TEST_PREFIX\";; *) exit 42;; esac\n",
 		"go": "#!/bin/sh\ncase \"$1\" in\n" +
 			"version) printf 'go version " + runtime.Version() + " darwin/" + runtime.GOARCH + "\\n' ;;\n" +
 			"env) printf '" + runtime.GOARCH + "\\n' ;;\n" +
-			"test) printf 'preflight passed\\n'; exit 43 ;;\n" +
+			"run) printf 'preflight passed\\n'; exit 43 ;;\n" +
 			"*) exit 44 ;;\nesac\n",
 		"pkg-config": `#!/bin/sh
 [ -z "${PKG_CONFIG_LIBDIR+x}" ] && [ -z "${PKG_CONFIG_SYSROOT_DIR+x}" ] || exit 1

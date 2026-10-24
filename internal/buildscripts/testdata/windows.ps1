@@ -14,24 +14,21 @@ function Assert-Throws {
     Assert ($null -ne $message -and $message -like $Pattern) "Expected error matching '$Pattern', got '$message'."
 }
 
-foreach ($name in @("build-windows.ps1", "bundle-windows.ps1", "windows-static.ps1", "test-build-windows.ps1")) {
+$scripts = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../../../scripts"))
+foreach ($path in @("$scripts/build-windows.ps1", $PSCommandPath)) {
     $tokens = $null
     $parseErrors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile("$PSScriptRoot/$name", [ref]$tokens, [ref]$parseErrors) | Out-Null
-    Assert ($parseErrors.Count -eq 0) "PowerShell parse errors in ${name}: $parseErrors"
+    [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors) | Out-Null
+    Assert ($parseErrors.Count -eq 0) "PowerShell parse errors in ${path}: $parseErrors"
 }
 
-. "$PSScriptRoot/build-windows.ps1"
+. "$scripts/build-windows.ps1"
 $pkgConfigPath = "C:\MSYS2 with spaces\ucrt64\bin\pkg-config.exe"
-$sharedLink = Get-WindowsLinkConfiguration $pkgConfigPath
-$staticLink = Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic -CxxLinker "g++.exe"
-Assert ($sharedLink.PkgConfig -eq '"C:/MSYS2 with spaces/ucrt64/bin/pkg-config.exe"') "pkg-config executable path was not quoted."
-Assert ($sharedLink.LinkerFlags -eq "" -and $sharedLink.BuildTags -eq "") "Shared linking gained static flags."
-Assert ($staticLink.PkgConfig -eq $sharedLink.PkgConfig) "PKG_CONFIG must not contain arguments that Go would discard."
-Assert ($staticLink.BuildTags -eq "pgs_static") "Static cgo directives were not enabled."
+$staticLink = Get-WindowsLinkConfiguration $pkgConfigPath -CxxLinker "g++.exe"
+Assert ($staticLink.PkgConfig -eq '"C:/MSYS2 with spaces/ucrt64/bin/pkg-config.exe"') "PKG_CONFIG must be a quoted executable without discarded arguments."
 Assert ($staticLink.LinkerFlags -eq "-linkmode=external -extld=g++.exe -extldflags=-static") "Static linking must use the C++ driver and retain -static."
-Assert-Throws { Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic } "*requires the matching C++ driver*"
-Assert-Throws { Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic -CxxLinker "gcc.exe" } "*requires the matching C++ driver*"
+Assert-Throws { Get-WindowsLinkConfiguration $pkgConfigPath } "*requires the matching C++ driver*"
+Assert-Throws { Get-WindowsLinkConfiguration $pkgConfigPath -CxxLinker "gcc.exe" } "*requires the matching C++ driver*"
 $allowedImports = @(
     "The Import Tables",
     "    DLL Name: KERNEL32.dll",
@@ -52,7 +49,7 @@ Assert ($x64.CxxLinker -eq "g++.exe") "The UCRT64 C++ linker must match GCC."
 $arm = Get-TargetConfiguration "Arm64"
 Assert ($arm.Arch -eq "arm64" -and $arm.Prefix -eq "clangarm64" -and $arm.Objdump -eq "llvm-objdump.exe") "Incorrect ARM64 toolchain."
 Assert ($arm.CxxLinker -eq "clang++.exe") "The ARM64 C++ linker must match Clang."
-$armLink = Get-WindowsLinkConfiguration $pkgConfigPath -UseStatic -CxxLinker $arm.CxxLinker
+$armLink = Get-WindowsLinkConfiguration $pkgConfigPath -CxxLinker $arm.CxxLinker
 Assert ($armLink.LinkerFlags -eq "-linkmode=external -extld=clang++.exe -extldflags=-static") "ARM64 must use the static Clang C++ driver, not GCC/libstdc++."
 Assert-Throws { Get-TargetConfiguration "x86" } "*Unsupported Windows architecture*"
 
@@ -98,15 +95,15 @@ $global:LASTEXITCODE = 0
 '@ | Set-Content -LiteralPath $objdump -Encoding Ascii
     $rejectedBundle = Join-Path $temp "rejected-static-bundle"
     Assert-Throws {
-        & "$PSScriptRoot/bundle-windows.ps1" -Binary $binary -Prefix $root -Destination $rejectedBundle -Objdump $objdump -Static
+        New-WindowsBundle -Binary $binary -Prefix $root -Destination $rejectedBundle -Objdump $objdump
     } "*non-allowlisted DLL*"
-    Assert (-not (Test-Path -LiteralPath "$rejectedBundle/libass-9.dll")) "Static bundler copied a DLL instead of failing."
+    Assert (-not (Test-Path -LiteralPath $rejectedBundle)) "A failed import audit must not create a package."
     @'
 param([string]$Mode, [string]$Binary)
 $global:LASTEXITCODE = 7
 '@ | Set-Content -LiteralPath $objdump -Encoding Ascii
     Assert-Throws {
-        & "$PSScriptRoot/bundle-windows.ps1" -Binary $binary -Prefix $root -Destination "$temp/failed-inspection" -Objdump $objdump -Static
+        New-WindowsBundle -Binary $binary -Prefix $root -Destination "$temp/failed-inspection" -Objdump $objdump
     } "*Cannot inspect imports*"
     Assert ((Find-Msys2Root $root) -eq [System.IO.Path]::GetFullPath($root)) "MSYS2 paths with spaces must remain intact."
     Assert-Throws { Find-Msys2Root "$root/ucrt64" } "*Invalid MSYS2 root*"
@@ -118,6 +115,21 @@ $global:LASTEXITCODE = 7
     Assert (-not $old.Ready) "An insufficient Go version must not pass preflight."
     $wrongArch = Get-GoStatus ([version]"1.24.0") "unsupported-test-architecture"
     Assert (-not $wrongArch.Ready) "An architecture mismatch must not pass preflight."
+    # Windows PowerShell can return multiple applications with the same name.
+    function Get-Command {
+        [CmdletBinding()]
+        param([string]$Name, [string]$CommandType)
+        Microsoft.PowerShell.Core\Get-Command @PSBoundParameters | Select-Object -First 1
+        if ($Name -eq "go") {
+            [pscustomobject]@{ Source = (Join-Path $temp "must-not-select-go.exe") }
+        }
+    }
+    try {
+        $multiple = Get-GoStatus ([version]"1.24.0") $hostArch.Trim()
+        Assert ($multiple.Ready -and $multiple.Path -eq $go.Path) "Multiple Go installations must use only the first PATH match."
+    } finally {
+        Remove-Item Function:Get-Command
+    }
     $shell = (Get-Process -Id $PID).Path
     Assert-Throws { Invoke-CheckedNative $shell @("-NoProfile", "-NonInteractive", "-Command", "exit 7") } "*exit code 7*"
 } finally {

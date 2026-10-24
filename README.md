@@ -16,7 +16,8 @@ It does not encode video, perform OCR, or mux MKV files.
 Run these commands from the project directory. No `Binary`, `Prefix` or
 `Destination` arguments are needed: the entry points detect the native
 architecture, locate dependencies, run tests and vet, build the CLI, collect
-shared libraries and licenses, and test the packaged executable.
+statically link third-party libraries, collect licenses, and test the standalone
+executable. **Windows and macOS only provide static builds.**
 
 **Windows (PowerShell or Command Prompt):**
 
@@ -46,6 +47,8 @@ Supply the MSYS2 root, not its `ucrt64` or `clangarm64` subdirectory.
 The launcher uses a process-scoped PowerShell execution-policy bypass; it does
 not permanently change the machine's policy.
 It uses built-in Windows PowerShell 5.1; installing PowerShell 7 is not required.
+When multiple Go installations are present, the first executable on `PATH` is
+used and checked for the required version and native architecture.
 
 **macOS (Terminal):**
 
@@ -62,6 +65,11 @@ bash scripts/build-macos.sh --install-dependencies
 [Homebrew](https://brew.sh) must already be installed. The opt-in flag permits
 installing/upgrading Go and installing pkgconf/libass. If Apple command-line
 tools are missing, it opens Apple's installer; complete installation and rerun.
+If Homebrew lacks Graphite2's static archive, the opt-in flag also permits
+installing CMake if needed and building Graphite2 1.3.15 privately under
+`build/native/` from pinned, SHA-256-verified source. Later builds reuse it.
+Other missing static libraries fail explicitly rather than falling back to
+dylibs. No Homebrew libraries are replaced or modified.
 
 Both entry points build **only for the current native architecture**, not by
 cross-compiling. Go, the C toolchain and native libraries must match.
@@ -73,28 +81,32 @@ packaging downloads license text; this is not an offline build mode.
 Results are written to `build/` and `dist/`. Each run creates a uniquely named
 package directory under `dist/`, plus a `.zip` (Windows) or `.tar.gz` (macOS)
 and a matching `.sha256` file. Existing successful packages are not deleted.
-Use the executable inside that directory; keep its accompanying libraries.
+Only the executable is needed at runtime; keep licenses and documentation when
+redistributing. OS-provided libraries/frameworks remain required.
 Run `.\scripts\build-windows.cmd -?` or
 `bash scripts/build-macos.sh --help` for help.
 
-### Windows single-EXE static build
+### Build script layout
 
-```powershell
-.\scripts\build-windows.cmd -Static
-# If dependency installation is explicitly allowed:
-.\scripts\build-windows.cmd -Static -InstallDependencies
-# Existing MSYS2 in a custom location:
-.\scripts\build-windows.cmd -Static -Msys2Root D:\tools\msys64
-```
+[`scripts/`](./scripts/) contains only `build-macos.sh`, `build-windows.cmd`
+and `build-windows.ps1`. Packaging and native dependency audits are integrated
+into the platform scripts; the CMD file launches the PowerShell script.
+[`cmd/macos-static/`](./cmd/macos-static/) is a build-time Go helper for resolving
+static archives and generating pkg-config metadata, not a runtime dependency.
+Build-script tests and PowerShell test fixtures live in
+[`internal/buildscripts/`](./internal/buildscripts/).
 
-From inside `scripts/`, use `.\build-windows.cmd -Static` instead.
+### Static-only linking and verification
+
+No build-mode flag is necessary. Windows still accepts the old `-Static`
+switch for compatibility, but it no longer selects a separate mode.
 This is real static linking, not an executable that extracts DLLs at startup.
 It uses the same system-font lookup and optional `--font-dir`; no fonts are
 bundled. Windows-provided DLLs (including the OS UCRT on Windows 10/11) remain
 required, but third-party renderer/compiler-runtime DLLs must not be imported.
 
-The build enables the Windows-only `pgs_static` cgo directives, requests
-`pkg-config --static` private dependencies, and forces static external linking.
+All builds request `pkg-config --static` private dependencies.
+On Windows the linker is forced into static external linking.
 C compilation still uses GCC/Clang, but the final linker uses the matching
 `g++` (UCRT64) or `clang++` (CLANGARM64) driver so C++ dependencies such as
 Graphite2 receive their runtime libraries after the static dependency archives.
@@ -103,17 +115,28 @@ MSYS2 compiler package; the static DLL-import audit remains mandatory.
 Matching static `.a` libraries for the entire dependency chain are required;
 an import library ending in `.dll.a` is not a substitute. Missing libraries or
 unresolved symbols fail the build, with no fallback to the DLL version.
-The existing build without `-Static` remains unchanged.
+Dynamic-library packaging has been removed.
 
-Outputs use `build/windows-<arch>-static/` and a uniquely named
-`dist/pgs-converter-windows-<arch>-static-.../` package. Only
-`pgs-converter.exe` is needed to run it; keep the accompanying notices and
+Outputs use `build/windows-<arch>-static/` or `build/macos-<arch>-static/`,
+and uniquely named `dist/pgs-converter-<os>-<arch>-static-.../` packages. Only
+`pgs-converter.exe` (Windows) or `pgs-converter` (macOS) is needed at runtime;
+keep the accompanying notices and
 documentation when distributing the package. Before declaring success the
 script audits PE imports against a Windows system-DLL allowlist, then copies
 only the EXE to a temporary directory and converts SRT and animated ASS with
 MSYS2 removed from PATH. `PE-IMPORTS.txt` records the audit result and
 `MSYS2-PACKAGES.txt` records installed package versions. An unknown
 import fails explicitly even if that DLL happens to exist in System32.
+
+On macOS, the build generates a self-contained `libass.pc` that replaces each
+third-party `-l...` with its explicit static `.a` path, retaining only SDK system
+libraries/frameworks dynamically. It uses Apple's C++ linker driver; macOS does
+not support Windows-style global `-static`. The package's `MACHO-IMPORTS.txt`
+must contain only `/usr/lib/` and `/System/Library/` imports. No dylibs or loader
+path rewrites are included. `static-archives.txt` records the exact native
+archives; the binary is ad-hoc signed, not notarized. SRT and animated ASS are
+tested at 3840x2160, 24000/1001 from a temporary directory containing only the
+executable, without Homebrew paths or DYLD environment variables.
 
 **Redistribution:** this remains a development package. Static linking may
 include LGPL components such as FriBidi and GLib. License text alone is not
@@ -123,23 +146,13 @@ instructions allowing users to relink with modified LGPL libraries. The
 scripts do not automatically assemble those compliance materials; see
 `THIRD_PARTY_NOTICES` and the generated `STATIC-LINKING.txt`.
 
-Static builds are included in the Windows x64/ARM64 CI jobs. They have not been
-built or executed on the local macOS development machine; passing native CI
-and clean-machine checks is still required before platform certification.
-
-### Manual build (advanced)
+### Build prerequisites and platform status
 
 Requirements: Go 1.24+, a cgo-compatible C compiler, pkg-config and libass
-development files. Development on macOS ARM64 has been verified against
-libass 0.17.5. FFmpeg is optional at runtime and is used for independent tests.
-
-#### macOS
-
-```sh
-brew install libass pkgconf
-go build -trimpath -o pgs-converter ./cmd/pgs-converter
-./pgs-converter version
-```
+development/static libraries. macOS may additionally require CMake for the
+private Graphite2 build. macOS ARM64 static builds have passed local tests,
+import audits, standalone 4K conversion and packaging using libass 0.17.5.
+FFmpeg is optional at runtime and is used for independent tests.
 
 Use a Go installation and Homebrew dependencies matching the target
 architecture. Setting `GOARCH` alone does not cross-compile C dependencies.
@@ -147,22 +160,19 @@ architecture. Setting `GOARCH` alone does not cross-compile C dependencies.
 #### Windows
 
 Use native Go plus MSYS2's **UCRT64** toolchain for x64, or **CLANGARM64** for
-ARM64. Install the matching compiler, libass and pkgconf packages. Add that
-environment's `bin` directory to PATH, set `CGO_ENABLED=1`, select `CC=gcc`
-(UCRT64) or `CC=clang` (CLANGARM64), and point `PKG_CONFIG_PATH` at its
-`lib/pkgconfig` directory before running:
-
-```powershell
-go build -trimpath -o pgs-converter.exe ./cmd/pgs-converter
-```
+ARM64. The build entry point configures the native compiler and C++ linker,
+pkg-config paths and static linkage, then audits the executable. Use these
+entry points rather than bypassing the static configuration with plain
+`go build`.
 
 The four-target GitHub Actions workflow runs these build-and-package entry
 points on macOS
-ARM64/x64 and Windows ARM64/x64, and prepares archives with shared native
-libraries. **Only macOS ARM64 has been run locally; the other targets and their
+ARM64/x64 and Windows ARM64/x64, and prepares static executable packages.
+**Only macOS ARM64 has been run locally; the other targets and their
 packaging are not certified until their CI jobs and clean-machine checks pass.**
 CI uses package-manager native dependencies and records installed versions;
-native dependencies are not yet reproducibly source-pinned.
+native dependencies are not yet fully reproducibly source-pinned (the private
+Graphite2 source is pinned).
 
 ## Convert one file
 
@@ -329,10 +339,15 @@ compliance and physical-player certification are out of scope.
 
 ## Development and validation
 
+The build entry points run tests and vet with the correct static configuration.
+For extra macOS tests after preparing a build (use `amd64` on Intel):
+
 ```sh
-go test ./...
+export PKG_CONFIG_PATH="$PWD/build/native/macos-arm64/pkgconfig"
+export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
+go test -ldflags "-linkmode=external -extld=/usr/bin/clang++" ./...
 go vet ./...
-go test -race ./...       # on supported host/toolchains
+go test -race -ldflags "-linkmode=external -extld=/usr/bin/clang++" ./...
 go test ./internal/pgs -run '^$' -fuzz FuzzRLE -fuzztime 5s
 go test ./internal/subtitle -run '^$' -fuzz FuzzDecode -fuzztime 5s
 ```
@@ -357,19 +372,16 @@ profiles. They do not certify player HDR interpretation. Quantization tests
 bound mean linear premultiplied component error to 0.025 and peak to 0.15 for
 the fixed gradient fixture, not arbitrary inputs.
 
-### Portable macOS archive
+### Static packages
 
 ```sh
-go build -trimpath -o build/pgs-converter ./cmd/pgs-converter
-bash scripts/bundle-macos.sh build/pgs-converter dist/pgs-converter-macos
+bash scripts/build-macos.sh
 ```
 
-The script copies transitive Homebrew dylibs, rewrites loader paths, applies
-ad-hoc signatures, and includes dependency notices and build-version records.
-It downloads the matching FreeType license text from the upstream source tag,
-so packaging requires internet access.
-This is not Apple notarization. The Windows companion script follows DLL
-imports and collects the selected MSYS2 environment's license directory.
+The build calls the static-only bundler automatically. Both bundlers reject
+third-party dynamic imports and include notices/build records without copying
+DLLs or dylibs. macOS packaging downloads the matching FreeType license text
+from the upstream source tag, so packaging requires internet access.
 See `THIRD_PARTY_NOTICES`; audit native dependency licenses and source/relinking
 obligations before publicly redistributing archives.
 

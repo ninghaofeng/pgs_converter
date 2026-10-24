@@ -11,15 +11,17 @@ usage() {
     cat <<'USAGE'
 Usage: bash scripts/build-macos.sh [--install-dependencies]
 
-Detect the native architecture, check dependencies, run tests and vet, build,
-and create a portable archive under dist/. No paths need to be supplied.
+Check dependencies, statically link third-party libraries, run tests and vet,
+and create a single-executable package under dist/. No paths are required.
 
-  --install-dependencies  Allow Homebrew to install missing Go/pkgconf/libass.
+  --install-dependencies  Allow missing tools/libraries and private source builds.
   -h, --help             Show this help without changing the environment.
 
 Homebrew must already be installed (https://brew.sh). If Apple command-line
 tools are missing, the install option opens Apple's installer; finish it and
-rerun this command. Builds may download Go modules and license text.
+rerun this command. Missing Graphite2 archives are built privately from pinned,
+checksum-verified source with explicit installation permission. Other missing
+static libraries cause an error, never a dylib fallback.
 USAGE
 }
 
@@ -27,6 +29,76 @@ fail() {
     printf 'Build failed: %s\n' "$*" >&2
     exit 1
 }
+
+bundle_macos() {
+    local binary=$1 destination=$2 metadata=$3 imports count=0
+    local prefix formula found notice version tag modules dependency
+    if [[ -e "$destination" ]]; then
+        echo "output directory already exists: $destination" >&2
+        exit 1
+    fi
+    imports=$(otool -L "$binary")
+    while IFS= read -r dependency; do
+        [[ -n "$dependency" ]] || continue
+        case "$dependency" in
+            /usr/lib/*|/System/Library/*) count=$((count + 1)) ;;
+            *) echo "static executable imports a non-system library: $dependency" >&2; exit 1 ;;
+        esac
+    done < <(printf '%s\n' "$imports" | tail -n +2 | sed -E 's/^[[:space:]]*//; s/ \(compatibility version.*$//')
+    [[ $count -gt 0 ]] || { echo "cannot verify Mach-O imports" >&2; exit 1; }
+    mkdir -p "$destination/licenses"
+    cp "$binary" "$destination/pgs-converter"
+    printf '%s\n' "$imports" > "$destination/MACHO-IMPORTS.txt"
+    cp "$metadata/static-archives.txt" "$metadata/native-prefixes.txt" "$metadata/libass.pc" "$destination/"
+    while IFS= read -r prefix; do
+        formula=$(basename "$(dirname "$prefix")")
+        if [[ -f "$prefix/SOURCE-INFO.txt" ]]; then formula=graphite2; fi
+        mkdir -p "$destination/licenses/$formula"
+        found=false
+        for notice in "$prefix"/COPYING* "$prefix"/LICENSE* "$prefix"/OFL* "$prefix"/AUTHORS* "$prefix"/LGPL* "$prefix"/SOURCE-INFO*; do
+            if [[ -f "$notice" ]]; then
+                cp "$notice" "$destination/licenses/$formula/"
+                found=true
+            fi
+        done
+        "$found" || { echo "native license notices missing: $prefix" >&2; exit 1; }
+        if [[ "$formula" == freetype ]]; then
+            version=$(basename "$prefix")
+            version=${version%%_*}
+            tag=${version//./-}
+            curl --fail --location --silent --show-error \
+                "https://raw.githubusercontent.com/freetype/freetype/VER-$tag/docs/FTL.TXT" \
+                -o "$destination/licenses/freetype/FTL.TXT"
+        fi
+    done < "$metadata/native-prefixes.txt"
+    cp README.md README.zh-CN.md THIRD_PARTY_NOTICES "$destination/"
+    modules=$(go env GOMODCACHE)
+    mkdir -p "$destination/licenses/pflag" "$destination/licenses/x-text" "$destination/licenses/go"
+    cp "$modules/github.com/spf13/pflag@v1.0.6/LICENSE" "$destination/licenses/pflag/"
+    cp "$modules/golang.org/x/text@v0.28.0/LICENSE" "$modules/golang.org/x/text@v0.28.0/PATENTS" "$destination/licenses/x-text/"
+    cp "$(go env GOROOT)/LICENSE" "$(go env GOROOT)/PATENTS" "$destination/licenses/go/"
+    {
+        go version
+        pkg-config --modversion libass
+        printf 'Linkage: static third-party archives; system libraries/frameworks remain dynamic.\n'
+    } > "$destination/BUILD-INFO.txt"
+    cat > "$destination/STATIC-LINKING.txt" <<'NOTICE'
+Fonts: system fonts or user-supplied --font-dir; no fonts bundled.
+This is a development package, not a redistribution-compliance bundle.
+Before redistribution, audit all licenses and provide applicable corresponding
+sources and materials/instructions to relink with modified LGPL libraries.
+License notices alone do not satisfy those requirements.
+See THIRD_PARTY_NOTICES and the README.
+NOTICE
+    codesign --force --sign - "$destination/pgs-converter"
+    codesign --verify --strict "$destination/pgs-converter"
+    "$destination/pgs-converter" version
+}
+
+# Tests can source packaging functions without starting a build.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 for argument in "$@"; do
     case "$argument" in
@@ -111,22 +183,75 @@ command -v pkg-config >/dev/null 2>&1 || fail "pkg-config is still unavailable a
 pkg-config --exists libass || fail "libass is still unavailable to pkg-config; check the Homebrew installation."
 export PKG_CONFIG="$(command -v pkg-config)"
 
+native_root="$repo_root/build/native/macos-$arch"
+graphite_prefix="$native_root/graphite2-1.3.15-static"
+if [[ ! -f "$brew_prefix/lib/libgraphite2.a" && ! -f "$graphite_prefix/lib/libgraphite2.a" ]]; then
+    "$install_dependencies" || fail "Graphite2's static archive is missing. Rerun with --install-dependencies to build a private, pinned static copy."
+    if ! command -v cmake >/dev/null 2>&1; then
+        "$brew_command" install cmake
+    fi
+    mkdir -p "$native_root"
+    graphite_archive="$native_root/graphite2-1.3.15.tgz"
+    graphite_hash=c6bc8b4252724665297f7cad0c55897285c673f9b8e6db3522ace833593fe0b1
+    if [[ ! -f "$graphite_archive" ]]; then
+        curl --fail --location --silent --show-error \
+            https://github.com/silnrsi/graphite/releases/download/1.3.15/graphite2-1.3.15.tgz \
+            -o "$graphite_archive"
+    fi
+    printf '%s  %s\n' "$graphite_hash" "$graphite_archive" | shasum -a 256 -c -
+    tar -xzf "$graphite_archive" -C "$native_root"
+    cmake -S "$native_root/graphite2-1.3.15" -B "$native_root/graphite2-build" \
+        -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_OSX_SYSROOT="$sdk_root" -DCMAKE_OSX_ARCHITECTURES="$(uname -m)" \
+        -DCMAKE_INSTALL_PREFIX="$graphite_prefix"
+    cmake --build "$native_root/graphite2-build" --parallel
+    cmake --install "$native_root/graphite2-build"
+    cp "$native_root/graphite2-1.3.15/COPYING" "$native_root/graphite2-1.3.15/LICENSE" "$graphite_prefix/"
+    printf 'graphite2 1.3.15\nsha256 %s\n' "$graphite_hash" > "$graphite_prefix/SOURCE-INFO.txt"
+fi
+metadata="$native_root/pkgconfig"
+extra_dir=
+if [[ -f "$graphite_prefix/lib/libgraphite2.a" ]]; then
+    extra_dir="$graphite_prefix/lib"
+fi
+go run ./cmd/macos-static -pkg-config "$PKG_CONFIG" -sdk "$sdk_root" \
+    -cellar "$("$brew_command" --cellar)" -output "$metadata" -extra-lib-dir "$extra_dir"
+export PKG_CONFIG_PATH="$metadata"
+export PKG_CONFIG_LIBDIR="$metadata"
+
 # Unique package names make repeated invocations safe without deleting a prior
 # successful package or asking beginners to choose a new destination directory.
 run_id="$(date +%Y%m%d-%H%M%S)-$$"
-build_dir="$repo_root/build/macos-$arch"
-package_name="pgs-converter-macos-$arch-$run_id"
+build_dir="$repo_root/build/macos-$arch-static"
+package_name="pgs-converter-macos-$arch-static-$run_id"
 destination="$repo_root/dist/$package_name"
 smoke="$build_dir/smoke-$run_id.sup"
-trap 'if [[ -f "$smoke" ]]; then rm -- "$smoke"; fi' EXIT
+isolated=
+cleanup() {
+    if [[ -f "$smoke" ]]; then rm -- "$smoke"; fi
+    if [[ -n "$isolated" ]]; then
+        rm -- "$isolated/pgs-converter"
+        rmdir -- "$isolated"
+    fi
+}
+trap cleanup EXIT
 
-printf 'Building macOS %s with %s and libass %s\n' "$arch" "$(go version)" "$(pkg-config --modversion libass)"
-go test ./...
+link_flags="-linkmode=external -extld=/usr/bin/clang++"
+printf 'Building macOS %s (static) with %s and libass %s\n' "$arch" "$(go version)" "$(pkg-config --modversion libass)"
+go test -ldflags "$link_flags" ./...
 go vet ./...
 mkdir -p "$build_dir" "$repo_root/dist"
-go build -trimpath -ldflags "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" -o "$build_dir/pgs-converter" ./cmd/pgs-converter
-bash "$script_dir/bundle-macos.sh" "$build_dir/pgs-converter" "$destination"
-"$destination/pgs-converter" convert testdata/sample.srt --size 1280x720 --fps 24 -o "$smoke"
+go build -trimpath -ldflags "$link_flags -X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" -o "$build_dir/pgs-converter" ./cmd/pgs-converter
+bundle_macos "$build_dir/pgs-converter" "$destination" "$metadata"
+isolated=$(mktemp -d "${TMPDIR:-/tmp}/pgs-static-smoke.XXXXXX")
+cp "$destination/pgs-converter" "$isolated/"
+(
+    cd "$isolated"
+    for fixture in sample.srt animated.ass; do
+        env -i PATH=/usr/bin:/bin HOME="$HOME" ./pgs-converter convert \
+            "$repo_root/testdata/$fixture" --size 3840x2160 --fps 24000/1001 --overwrite -o "$smoke"
+    done
+)
 if command -v ffprobe >/dev/null 2>&1; then
     ffprobe -v error -show_streams "$smoke"
 else

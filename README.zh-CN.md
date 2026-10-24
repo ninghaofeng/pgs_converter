@@ -15,7 +15,8 @@
 
 在项目目录中执行以下命令即可。**无需再填写 `Binary`、`Prefix`、
 `Destination`**：脚本会识别本机架构、查找依赖、运行测试和检查、
-编译程序、收集动态库及许可证，并测试打包后的程序。
+静态链接第三方库、收集许可证，并测试可独立运行的程序。
+**Windows 和 macOS 现在都只提供静态构建。**
 
 **Windows：在 PowerShell 或命令提示符中运行**
 
@@ -46,6 +47,7 @@
 启动器仅对子 PowerShell 进程临时使用执行策略绕过，
 不会永久更改系统的执行策略。
 启动器使用系统自带的 Windows PowerShell 5.1，无需额外安装 PowerShell 7。
+如果存在多个 Go 安装，使用 `PATH` 顺序中的第一个，并检查其版本和本机架构。
 
 **macOS：在终端中运行**
 
@@ -62,6 +64,10 @@ bash scripts/build-macos.sh --install-dependencies
 需要事先安装 [Homebrew](https://brew.sh)。显式安装选项允许安装或升级 Go，
 以及安装 pkgconf/libass。如果缺少 Apple 命令行工具，脚本会打开系统安装器；
 完成安装后重新运行即可。
+如果 Homebrew 没有 Graphite2 静态库，显式安装选项还允许在需要时安装 CMake，
+并从固定版本、经过 SHA-256 校验的源码构建 Graphite2 1.3.15，
+仅安装到项目的 `build/native/`，后续构建会复用。
+其他静态库缺失时明确报错，不会退回 dylib，也不会替换或修改 Homebrew 的库。
 
 两个入口都只构建**当前本机架构**，不通过修改 `GOARCH` 交叉编译；
 Go、C 工具链及原生库的架构必须匹配。
@@ -73,28 +79,32 @@ FFmpeg 不是必需依赖：相应工具可用时会执行独立解码测试及�
 中间编译文件放在 `build/`，可运行的完整程序包放在 `dist/`。
 每次运行都会生成唯一命名的包目录、Windows 的 `.zip` 或 macOS 的 `.tar.gz`
 压缩包，以及对应的 `.sha256` 校验文件，不会删除之前成功生成的程序包。
-使用包目录中的可执行文件时，请保留旁边的动态库。
+运行时只需包内的可执行文件；再分发时应保留许可证和说明。
+操作系统自带的库和 Framework 仍然需要。
 查看脚本帮助可运行 `.\scripts\build-windows.cmd -?`
 或 `bash scripts/build-macos.sh --help`。
 
-### Windows 单 EXE 静态构建
+### 构建脚本目录
 
-```powershell
-.\scripts\build-windows.cmd -Static
-# 显式允许安装缺少的依赖：
-.\scripts\build-windows.cmd -Static -InstallDependencies
-# 使用自定义位置的 MSYS2：
-.\scripts\build-windows.cmd -Static -Msys2Root D:\tools\msys64
-```
+[`scripts/`](./scripts/) 仅保留 `build-macos.sh`、`build-windows.cmd`
+和 `build-windows.ps1` 三个入口文件。
+打包和原生依赖审计已合并到各平台主脚本，CMD 文件负责启动 PowerShell 脚本。
+[`cmd/macos-static/`](./cmd/macos-static/) 是构建时使用的 Go 辅助工具，
+负责解析静态库及生成 pkg-config 元数据，不是运行时依赖。
+构建脚本测试及 PowerShell 测试数据放在
+[`internal/buildscripts/`](./internal/buildscripts/)。
 
-如果当前就在 `scripts/` 目录中，使用 `.\build-windows.cmd -Static`。
+### 仅静态链接及验证
+
+无需指定构建模式。Windows 仍接受旧的 `-Static` 参数以兼容已有命令，
+但不再区分两种模式。
 这是实际静态链接，不是启动后解压 DLL 的自解压程序。
 字体仍使用系统已安装字体，也保留 `--font-dir`，不捆绑字体文件。
 程序仍依赖 Windows 系统自带的 DLL（包括 Windows 10/11 的系统 UCRT），
 但不允许导入第三方渲染库或编译器运行库 DLL。
 
-构建会启用仅对 Windows 生效的 `pgs_static` cgo 指令，
-通过 `pkg-config --static` 展开私有依赖，并强制外部静态链接。
+两个平台均通过 `pkg-config --static` 展开私有依赖，
+Windows 强制外部静态链接。
 C 代码仍由 GCC/Clang 编译，最终链接则使用同一工具链的
 `g++`（UCRT64）或 `clang++`（CLANGARM64），
 确保 Graphite2 等 C++ 静态依赖之后正确加入对应的 C++ 运行库。
@@ -103,16 +113,27 @@ C++ 驱动会与 C 编译器一起检查，由同一个 MSYS2 编译器软件包
 整条依赖链都必须有对应架构的静态 `.a` 库；
 以 `.dll.a` 结尾的 DLL 导入库不能代替静态库。
 缺少库或出现未解析符号时会明确失败，不会自动退回 DLL 版。
-不加 `-Static` 的原构建方式保持不变。
+原来的动态库打包流程已移除。
 
-静态构建文件位于 `build/windows-<架构>-static/`，
-完整包位于唯一命名的 `dist/pgs-converter-windows-<架构>-static-.../`。
-运行时只需其中的 `pgs-converter.exe`；再分发时应保留附带的许可证和说明。
+静态构建文件位于 `build/windows-<架构>-static/` 或 `build/macos-<架构>-static/`，
+完整包位于唯一命名的 `dist/pgs-converter-<系统>-<架构>-static-.../`。
+运行时只需其中的 `pgs-converter.exe`（Windows）或 `pgs-converter`（macOS）；
+再分发时应保留附带的许可证和说明。
 脚本在报告成功前会按 Windows 系统 DLL 白名单审计 PE 导入表，
 然后仅复制 EXE 到临时目录，移除 PATH 中的 MSYS2 路径，
 实际转换 SRT 和动画 ASS。审计结果保存在 `PE-IMPORTS.txt`，
 已安装的软件包版本记录在 `MSYS2-PACKAGES.txt`。
 即使某个未知 DLL 恰好位于 System32，也会明确失败，不会默认为系统依赖。
+
+macOS 会生成独立的 `libass.pc`，将第三方 `-l...` 参数替换为明确的静态 `.a`
+路径，仅保留 SDK 中的系统库和 Framework 动态链接。
+最终使用 Apple C++ 链接驱动；macOS 不支持照搬 Windows 的全局 `-static`。
+包内 `MACHO-IMPORTS.txt` 只能包含 `/usr/lib/` 和 `/System/Library/` 的导入，
+不附带 dylib，也不再重写动态库加载路径。
+`static-archives.txt` 记录实际链接的原生静态库，并为可执行文件应用 ad-hoc 签名，
+但不等于 Apple 公证。脚本将可执行文件单独复制到临时目录，
+清除 Homebrew 路径及 DYLD 环境变量后，
+实际执行 3840×2160、24000/1001 的 SRT 和动画 ASS 转换。
 
 **再分发注意事项：**目前生成的仍是开发包。
 静态链接可能包含 FriBidi、GLib 等 LGPL 组件。
@@ -121,50 +142,28 @@ C++ 驱动会与 C 编译器一起检查，由同一个 MSYS2 编译器软件包
 脚本不会自动准备完整的合规材料，详见
 [THIRD_PARTY_NOTICES](./THIRD_PARTY_NOTICES) 和包内的 `STATIC-LINKING.txt`。
 
-Windows x64/ARM64 CI 均已加入静态构建。
-本地 macOS 开发环境尚未构建或执行 Windows 静态程序；
-平台认证仍需实际通过原生 CI 及干净环境测试。
+### 构建前提与平台验证状态
 
-### 手动构建（进阶）
-
-需要 Go 1.24 或更高版本、支持 cgo 的 C 编译器、pkg-config 和 libass 开发文件。
-已在 macOS ARM64 上使用 libass 0.17.5 完成本地开发验证。
+需要 Go 1.24 或更高版本、支持 cgo 的 C 编译器、pkg-config 和 libass 开发文件及静态库。
+macOS 私有构建 Graphite2 时还需要 CMake。
+macOS ARM64 已使用 libass 0.17.5 完成静态构建、测试、导入表审计、
+独立 4K 转换和打包验证。
 转换程序运行时不依赖 FFmpeg；开发测试使用 FFmpeg 进行独立解码验证。
-
-#### macOS
-
-```sh
-brew install libass pkgconf
-go build -trimpath -o pgs-converter ./cmd/pgs-converter
-./pgs-converter version
-```
 
 Go 和 Homebrew 依赖需要与目标架构一致。
 仅设置 `GOARCH` 并不能完成原生 C 依赖的交叉编译。
 
-#### Windows
-
 x64 使用 Windows 原生 Go 和 MSYS2 的 **UCRT64** 工具链；
 ARM64 使用 Windows 原生 Go 和 **CLANGARM64** 工具链。
-安装对应环境的编译器、libass 和 pkgconf 软件包后：
-
-- 将该环境的 `bin` 目录加入 `PATH`。
-- 设置 `CGO_ENABLED=1`。
-- UCRT64 设置 `CC=gcc`；CLANGARM64 设置 `CC=clang`。
-- 将 `PKG_CONFIG_PATH` 指向该环境的 `lib/pkgconfig` 目录。
-
-然后运行：
-
-```powershell
-go build -trimpath -o pgs-converter.exe ./cmd/pgs-converter
-```
+构建入口会配置本机的 C 编译器、C++ 链接驱动、pkg-config 路径和静态链接，
+然后审计产物。请使用这些入口，不要用裸 `go build` 绕过静态构建配置。
 
 GitHub Actions 已配置使用上述入口执行 macOS ARM64/x64 和 Windows ARM64/x64
-四个目标的构建、测试及共享原生库打包流程。**目前只有 macOS ARM64 完成本地运行验证；
+四个目标的构建、测试及静态程序打包流程。**目前只有 macOS ARM64 完成本地运行验证；
 其他目标及其打包流程需要通过实际 CI 和干净环境测试后才能确认。**
 
 CI 使用软件包管理器提供的原生依赖，并记录已安装版本；
-目前尚未实现基于锁定源码版本的可重现原生依赖构建。
+目前尚未实现所有原生依赖的锁定源码可重现构建，私有 Graphite2 源码已锁定版本和校验值。
 
 ## 单文件转换
 
@@ -331,10 +330,15 @@ SDR 输出使用 BT.709 有限范围调色板转换。
 
 ## 开发与验证
 
+构建入口会使用正确的静态配置运行测试和检查。
+完成一次 macOS 构建后，额外测试可执行以下命令（Intel 将 `arm64` 改为 `amd64`）：
+
 ```sh
-go test ./...
+export PKG_CONFIG_PATH="$PWD/build/native/macos-arm64/pkgconfig"
+export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
+go test -ldflags "-linkmode=external -extld=/usr/bin/clang++" ./...
 go vet ./...
-go test -race ./...       # 需要主机及工具链支持
+go test -race -ldflags "-linkmode=external -extld=/usr/bin/clang++" ./...
 go test ./internal/pgs -run '^$' -fuzz FuzzRLE -fuzztime 5s
 go test ./internal/subtitle -run '^$' -fuzz FuzzDecode -fuzztime 5s
 ```
@@ -358,20 +362,15 @@ HDR 测试验证 ST 2084 参考数值、原色转换、调色板黑白点、
 对于固定渐变样例，量化测试要求线性光预乘分量的平均误差不超过 0.025、
 峰值不超过 0.15；这些阈值不适用于任意输入。
 
-### macOS 便携包
+### 静态程序包
 
 ```sh
-go build -trimpath -o build/pgs-converter ./cmd/pgs-converter
-bash scripts/bundle-macos.sh build/pgs-converter dist/pgs-converter-macos
+bash scripts/build-macos.sh
 ```
 
-脚本会复制传递依赖的 Homebrew dylib、重写加载路径、应用 ad-hoc 签名，
-并包含依赖许可证说明和构建版本记录。
-它会从匹配的上游源码标签下载 FreeType 许可证全文，因此打包需要联网。
-这不等于通过 Apple 公证。
-
-Windows 配套脚本会沿 DLL 导入关系收集依赖，
-并复制所选 MSYS2 环境的许可证目录。
+构建脚本会自动调用仅支持静态产物的打包脚本。
+两个平台都拒绝第三方动态依赖，收集许可证和构建记录，不复制 DLL 或 dylib。
+macOS 会从匹配的上游源码标签下载 FreeType 许可证全文，因此打包需要联网。
 公开再分发压缩包前，应参阅 [THIRD_PARTY_NOTICES](./THIRD_PARTY_NOTICES)，
 审核原生依赖许可证、对应源码提供及重新链接等义务。
 

@@ -27,9 +27,11 @@ Native renderer and common transitive components:
   https://github.com/fribidi/fribidi/blob/master/COPYING
 
 The exact native dependency graph depends on the platform and installed
-packages. Build information is included in generated packages. The default
-build retains shared native libraries. The opt-in Windows -Static build links
-native libraries into the executable and does not bundle font files.
+packages. Build information is included in generated packages. Windows and
+macOS builds statically link third-party native libraries into the executable.
+Only operating-system libraries/frameworks remain dynamically linked.
+No font files are bundled. The private macOS Graphite2 build uses the MIT
+license option; its version and source checksum are recorded in the package.
 
 Static development packages are NOT complete redistribution-compliance
 bundles. LGPL components can include FriBidi and, through HarfBuzz, GLib.
