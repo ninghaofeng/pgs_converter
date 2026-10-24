@@ -8,13 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
+	"github.com/ninghaofeng/pgs_converter/internal/batch"
 	"github.com/ninghaofeng/pgs_converter/internal/colorx"
 	"github.com/ninghaofeng/pgs_converter/internal/convert"
 	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
@@ -23,99 +21,6 @@ import (
 
 // Version is replaced by release builds using -ldflags "-X .../cli.Version=...".
 var Version = "dev"
-
-// job also represents discovery failures, keeping them in normal batch results
-// instead of aborting otherwise valid files before workers can run.
-type job struct {
-	input, output string
-	err           error
-}
-
-type completed struct {
-	job
-	result   convert.Result
-	progress *convert.Progress
-	started  bool
-}
-
-func supported(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".srt", ".ass", ".ssa":
-		return true
-	}
-	return false
-}
-
-// discover preserves paths relative to each directory root and flattens
-// individually listed files. WalkDir does not follow directory symlinks.
-// Colliding destinations fail every contributing input before writes begin.
-func discover(inputs []string, output string, recursive bool) []job {
-	var jobs []job
-	for _, input := range inputs {
-		info, err := os.Stat(input)
-		if err != nil {
-			jobs = append(jobs, job{input: input, err: err})
-			continue
-		}
-		if !info.IsDir() {
-			if !supported(input) {
-				jobs = append(jobs, job{input: input, err: fmt.Errorf("unsupported subtitle extension")})
-			} else {
-				jobs = append(jobs, job{input: input, output: filepath.Join(output, strings.TrimSuffix(filepath.Base(input), filepath.Ext(input))+".sup")})
-			}
-			continue
-		}
-		err = filepath.WalkDir(input, func(path string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				jobs = append(jobs, job{input: path, err: walkErr})
-				if entry != nil && entry.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if entry.IsDir() {
-				if path != input && !recursive {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !supported(path) {
-				return nil
-			}
-			rel, err := filepath.Rel(input, path)
-			if err != nil {
-				return err
-			}
-			jobs = append(jobs, job{input: path, output: filepath.Join(output, strings.TrimSuffix(rel, filepath.Ext(rel))+".sup")})
-			return nil
-		})
-		if err != nil {
-			jobs = append(jobs, job{input: input, err: err})
-		}
-	}
-	// Compare absolute, case-folded paths even on case-sensitive hosts so a
-	// batch has the same conservative collision policy on Windows and macOS.
-	destinations := make(map[string][]int)
-	for i, j := range jobs {
-		if j.err != nil {
-			continue
-		}
-		abs, err := filepath.Abs(j.output)
-		if err != nil {
-			jobs[i].err = err
-			continue
-		}
-		destinations[strings.ToLower(abs)] = append(destinations[strings.ToLower(abs)], i)
-	}
-	for _, indexes := range destinations {
-		if len(indexes) > 1 {
-			for _, i := range indexes {
-				jobs[i].err = fmt.Errorf("multiple inputs map to output %s", jobs[i].output)
-			}
-		}
-	}
-	return jobs
-}
 
 // Run executes CLI arguments without the executable name and never calls os.Exit.
 // It returns 0 for success/help/version, 1 for conversion failures, 2 for invalid
@@ -209,7 +114,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if workers < 1 || workers > 32 {
 		return fail(fmt.Errorf("--jobs must be in 1..32"))
 	}
-	var jobs []job
+	var jobs []batch.Job
 	if command == "convert" {
 		if flags.NArg() != 1 || output == "" || outDir != "" || recursive || flags.Changed("jobs") {
 			return fail(fmt.Errorf("convert requires one input and -o OUTPUT; batch-only options are not accepted"))
@@ -217,12 +122,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if !strings.EqualFold(filepath.Ext(output), ".sup") {
 			return fail(fmt.Errorf("output must have .sup extension"))
 		}
-		jobs = []job{{input: flags.Arg(0), output: output}}
+		jobs = []batch.Job{{Input: flags.Arg(0), Output: output}}
 	} else {
 		if flags.NArg() < 1 || outDir == "" || output != "" {
 			return fail(fmt.Errorf("batch requires inputs and --output-dir DIR; -o is not accepted"))
 		}
-		jobs = discover(flags.Args(), outDir, recursive)
+		jobs = batch.Discover(flags.Args(), outDir, recursive)
 		if len(jobs) == 0 {
 			return fail(fmt.Errorf("no SRT, ASS or SSA files found"))
 		}
@@ -245,79 +150,36 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "warning: SDR palette uses BT.709; some players assume BT.601 for canvases at or below 576 lines")
 		}
 	}
-	// Unbuffered dispatch limits active work to the worker count. Results are
-	// collected below while workers run, so completion sends cannot deadlock.
-	tasks := make(chan job)
-	results := make(chan completed)
-	var wg sync.WaitGroup
-	for i := 0; i < min(workers, len(jobs)); i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := range tasks {
-				result := convert.Result{}
-				if j.err == nil {
-					if err := ctx.Err(); err != nil {
-						j.err = err
-					} else {
-						fileOpt := opt
-						if !noProgress {
-							results <- completed{job: j, started: true}
-							fileOpt.Progress = func(progress convert.Progress) {
-								results <- completed{job: j, progress: &progress}
-							}
-						}
-						// Each File call owns its libass state and staged output.
-						result, j.err = convert.File(ctx, j.input, j.output, fileOpt)
-					}
-				}
-				results <- completed{job: j, result: result}
-			}
-		}()
+	results, err := batch.Run(ctx, jobs, opt, workers, !noProgress)
+	if err != nil {
+		return fail(err)
 	}
-	// Only the producer closes tasks; cancellation stops further scheduling
-	// once observed, while the collector still drains all active conversions.
-	go func() {
-		defer close(tasks)
-		for _, j := range jobs {
-			select {
-			case tasks <- j:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	// Results close only after every worker exits, never from a worker itself.
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
 	// Serialize diagnostics here rather than writing from conversion workers.
 	// Completion order is intentionally not the original input order.
 	success, failed, warnings := 0, 0, globalWarnings
 	for done := range results {
-		if done.started {
-			fmt.Fprintf(stderr, "START %s -> %s\n", done.input, done.output)
+		if done.Started {
+			fmt.Fprintf(stderr, "START %s -> %s\n", done.Input, done.Output)
 			continue
 		}
-		if p := done.progress; p != nil {
+		if p := done.Progress; p != nil {
 			percent := 100 * float64(p.Processed) / float64(p.Total)
 			if p.Processed < p.Total {
 				percent = min(percent, 99.9)
 			}
 			fmt.Fprintf(stderr, "progress: %s: %.1f%% (%d/%d sampled frames, %d display sets)\n",
-				done.input, percent, p.Processed, p.Total, p.DisplaySets)
+				done.Input, percent, p.Processed, p.Total, p.DisplaySets)
 			continue
 		}
-		for _, warning := range done.result.Warnings {
-			fmt.Fprintf(stderr, "warning: %s: %s\n", done.input, warning)
+		for _, warning := range done.Result.Warnings {
+			fmt.Fprintf(stderr, "warning: %s: %s\n", done.Input, warning)
 			warnings++
 		}
-		if done.err != nil {
-			fmt.Fprintf(stderr, "FAIL %s -> %s: %v\n", done.input, done.output, done.err)
+		if done.Err != nil {
+			fmt.Fprintf(stderr, "FAIL %s -> %s: %v\n", done.Input, done.Output, done.Err)
 			failed++
 		} else {
-			fmt.Fprintf(stderr, "OK %s -> %s (%d display sets)\n", done.input, done.output, done.result.Frames)
+			fmt.Fprintf(stderr, "OK %s -> %s (%d display sets)\n", done.Input, done.Output, done.Result.Frames)
 			success++
 		}
 	}

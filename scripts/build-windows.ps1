@@ -15,12 +15,15 @@ Static redistribution requires a separate license review.
 .\scripts\build-windows.ps1 -Msys2Root D:\tools\msys64
 .EXAMPLE
 .\scripts\build-windows.ps1 -Static
+.EXAMPLE
+.\scripts\build-windows.ps1 -Gui
 #>
 [CmdletBinding()]
 param(
     [switch]$InstallDependencies,
     [string]$Msys2Root,
-    [switch]$Static # Compatibility alias: static is now the only build mode.
+    [switch]$Static, # Compatibility alias: static is now the only build mode.
+    [switch]$Gui
 )
 
 Set-StrictMode -Version Latest
@@ -50,9 +53,9 @@ function Assert-WindowsStaticImports {
         "dnsapi.dll", "dwmapi.dll", "dwrite.dll", "gdi32.dll", "imm32.dll",
         "iphlpapi.dll", "kernel32.dll", "kernelbase.dll", "msimg32.dll",
         "msvcrt.dll", "mswsock.dll", "ncrypt.dll", "netapi32.dll",
-        "normaliz.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll",
+        "normaliz.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll", "opengl32.dll",
         "powrprof.dll", "profapi.dll", "propsys.dll", "psapi.dll",
-        "rpcrt4.dll", "secur32.dll", "setupapi.dll", "shell32.dll",
+        "rpcrt4.dll", "secur32.dll", "setupapi.dll", "shell32.dll", "shcore.dll",
         "shlwapi.dll", "ucrtbase.dll", "user32.dll", "userenv.dll",
         "usp10.dll", "uxtheme.dll", "version.dll", "winhttp.dll",
         "wininet.dll", "winmm.dll", "winspool.drv", "wintrust.dll",
@@ -79,18 +82,32 @@ function New-WindowsBundle {
         [Parameter(Mandatory=$true)][string]$Binary,
         [Parameter(Mandatory=$true)][string]$Prefix,
         [Parameter(Mandatory=$true)][string]$Destination,
-        [string]$Objdump = "objdump"
+        [string]$Objdump = "objdump",
+        [string]$GuiBinary
     )
     if (Test-Path $Destination) { throw "Output directory already exists: $Destination" }
     $imports = & $Objdump -p $Binary
     if ($LASTEXITCODE -ne 0) { throw "Cannot inspect imports of $Binary" }
     $verified = Assert-WindowsStaticImports $imports
+    $guiImports = @()
+    if ($GuiBinary) {
+        $imports = & $Objdump -p $GuiBinary
+        if ($LASTEXITCODE -ne 0) { throw "Cannot inspect imports of $GuiBinary" }
+        $guiImports = @(Assert-WindowsStaticImports $imports)
+    }
     New-Item -ItemType Directory -Path $Destination | Out-Null
     $verified | Set-Content -LiteralPath "$Destination/PE-IMPORTS.txt" -Encoding Ascii
     Copy-Item -LiteralPath $Binary -Destination "$Destination/pgs-converter.exe"
+    if ($GuiBinary) {
+        Copy-Item -LiteralPath $GuiBinary -Destination "$Destination/pgs-converter-gui.exe"
+        $guiImports | Set-Content -LiteralPath "$Destination/GUI-PE-IMPORTS.txt" -Encoding Ascii
+        Invoke-CheckedNative "go" @("run", "./cmd/package-licenses", "-output", "$Destination/licenses/go-modules")
+        Invoke-CheckedNative "$Destination/pgs-converter-gui.exe" @("-version")
+    }
     Copy-Item README.md, README.zh-CN.md, THIRD_PARTY_NOTICES $Destination
     if (-not (Test-Path "$Prefix/share/licenses")) { throw "Native dependency licenses not found" }
-    Copy-Item -Recurse "$Prefix/share/licenses" "$Destination/licenses"
+    New-Item -ItemType Directory -Force -Path "$Destination/licenses" | Out-Null
+    Copy-Item -Recurse "$Prefix/share/licenses/*" "$Destination/licenses"
     $modules = & go env GOMODCACHE
     if ($LASTEXITCODE -ne 0) { throw "Cannot locate Go module cache" }
     New-Item -ItemType Directory -Path "$Destination/licenses/pflag", "$Destination/licenses/x-text", "$Destination/licenses/go" | Out-Null
@@ -107,7 +124,8 @@ function New-WindowsBundle {
     if ($LASTEXITCODE -ne 0) { throw "Cannot record native dependency flags" }
     @(
         "Linkage: static third-party libraries; Windows system DLLs remain required.",
-        "Fonts: system fonts or user-supplied --font-dir; no fonts bundled.",
+        "Subtitle fonts: system fonts or user-supplied --font-dir; none bundled.",
+        "The optional GUI embeds toolkit UI fonts; see licenses/go-modules.",
         "This is a development package, not a redistribution-compliance bundle.",
         "Before redistribution, provide applicable LGPL corresponding sources",
         "and materials/instructions to relink with modified LGPL libraries.",
@@ -213,7 +231,7 @@ function Install-WingetPackage {
 }
 
 function Invoke-WindowsBuild {
-    param([switch]$AllowInstall, [string]$RequestedRoot)
+    param([switch]$AllowInstall, [string]$RequestedRoot, [switch]$WithGui)
     if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
         throw "This script requires Windows. Use build-macos.sh on macOS."
     }
@@ -304,7 +322,12 @@ function Invoke-WindowsBuild {
         if ($env:GITHUB_SHA) { $version = $env:GITHUB_SHA }
         $buildFlags = "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=$version $($link.LinkerFlags)"
         Invoke-CheckedNative $go.Path @("build", "-trimpath", "-ldflags", $buildFlags, "-o", $binary, "./cmd/pgs-converter")
-        New-WindowsBundle -Binary $binary -Prefix $prefix -Destination $destination -Objdump (Join-Path $prefix "bin/$($target.Objdump)")
+        $guiBinary = $null
+        if ($WithGui) {
+            $guiBinary = Join-Path $build "pgs-converter-gui.exe"
+            Invoke-CheckedNative $go.Path @("build", "-trimpath", "-ldflags", "$buildFlags -H windowsgui", "-o", $guiBinary, "./cmd/pgs-converter-gui")
+        }
+        New-WindowsBundle -Binary $binary -GuiBinary $guiBinary -Prefix $prefix -Destination $destination -Objdump (Join-Path $prefix "bin/$($target.Objdump)")
         Invoke-CheckedNative (Join-Path $msys "usr/bin/pacman.exe") @("-Q") |
             Set-Content -LiteralPath "$destination/MSYS2-PACKAGES.txt" -Encoding Ascii
         $smoke = Join-Path $build "smoke-$runId.sup"
@@ -343,7 +366,7 @@ function Invoke-WindowsBuild {
 # Dot-sourcing exposes helpers for tests without starting installers or a build.
 if ($MyInvocation.InvocationName -ne ".") {
     try {
-        Invoke-WindowsBuild -AllowInstall:$InstallDependencies -RequestedRoot $Msys2Root
+        Invoke-WindowsBuild -AllowInstall:$InstallDependencies -RequestedRoot $Msys2Root -WithGui:$Gui
     } catch {
         [System.Console]::Error.WriteLine("Build failed: " + $_.Exception.Message)
         exit 1

@@ -9,6 +9,67 @@ layers, vector drawings, fades, movement, transforms and karaoke.
 This is an initial implementation, not a Blu-ray authoring/compliance tool.
 It does not encode video, perform OCR, or mux MKV files.
 
+## Desktop UI (initial version)
+
+An optional Fyne 2.8 desktop app shares the CLI's conversion engine and batch
+scheduler. It uses Go widgets, not a WebView; Node.js, a browser and WebView2
+are not required. CLI commands and default CLI-only packaging are unchanged.
+
+```sh
+# macOS: package the CLI and PGS Converter.app together
+bash scripts/build-macos.sh --gui
+```
+
+```powershell
+# Windows: package the CLI and pgs-converter-gui.exe together
+.\scripts\build-windows.cmd -Gui
+```
+
+Add the existing dependency-install option if needed. On macOS, open the
+generated `PGS Converter.app`; on Windows, open `pgs-converter-gui.exe`.
+The macOS bundle is ad-hoc signed for development, not Developer ID signed or
+notarized. Public distribution still requires platform signing/release checks.
+
+The interface supports **English and Simplified Chinese**. On first launch,
+Chinese system locales select Simplified Chinese; other locales select English.
+Use **Language / 界面语言** at the top of the settings panel to switch immediately
+without restarting, clearing the queue, interrupting conversions or resetting
+preview. The choice is saved immediately, independently of conversion settings.
+You can also launch the GUI with `-language en` or `-language zh-CN`.
+Application controls, statuses, preview explanations, validation messages and
+application dialogs follow this selection. Original engine/libass diagnostics
+and existing log entries are preserved; toolkit-internal file-picker text may
+still follow the operating system locale.
+
+The interface supports file/folder drag and drop,
+recursive discovery, removing queued files, resolution and exact rational FPS,
+SDR/experimental HDR10 with reference white, input encodings, additional font
+folders, SRT font/size/margin, output folder, overwrite protection, concurrency,
+per-file progress, cancellation and copyable diagnostics. Valid settings are
+remembered between runs. Output is flat: equal basenames are blocked before
+conversion; the CLI still preserves relative paths for directory batches.
+Fyne's file/folder dialogs are used, not OS-native picker panels.
+
+Select a file and use **First subtitle**, **Render at time**, **Previous** or
+**Next**. Time is integer milliseconds. Preview renders at the selected canvas
+size with the same libass/SRT preparation as export, then scales for display.
+It is **SDR style preview only**, not SUP palette/quantization preview and not
+HDR luminance simulation or HDR playback certification. ASS/SSA retain their
+own styles. Preview renderers are isolated from conversion workers.
+
+Settings are snapshotted per run. Cancellation is checked between frames and
+may wait for a native render call; closing during conversion waits for output
+cleanup. There is no pause/resume, video playback, per-file setting override,
+or task persistence in this initial version. Logs retain the latest 500 entries.
+The overall progress bar is equal-task-weighted, not an ETA.
+
+GUI packages retain static third-party native linking and reject third-party
+DLL/dylib imports. System graphics libraries/drivers remain required. Fyne
+embeds UI fonts; these are separate from subtitle fonts and their notices are
+collected from the Go dependency graph. CI builds the GUI on all four targets;
+native graphics, drag/drop, IME and high-DPI acceptance, particularly on
+Windows ARM64, must still be verified on real target systems.
+
 ## Build
 
 ### Recommended: one-command build and package
@@ -101,8 +162,9 @@ Build-script tests and PowerShell test fixtures live in
 No build-mode flag is necessary. Windows still accepts the old `-Static`
 switch for compatibility, but it no longer selects a separate mode.
 This is real static linking, not an executable that extracts DLLs at startup.
-It uses the same system-font lookup and optional `--font-dir`; no fonts are
-bundled. Windows-provided DLLs (including the OS UCRT on Windows 10/11) remain
+It uses the same system-font lookup and optional `--font-dir`; no subtitle fonts
+are bundled (the optional GUI embeds its own UI fonts). Windows-provided DLLs
+(including the OS UCRT on Windows 10/11) remain
 required, but third-party renderer/compiler-runtime DLLs must not be imported.
 
 All builds request `pkg-config --static` private dependencies.
@@ -254,7 +316,7 @@ Exit codes: `0` success/help/version, `1` one or more conversion failures,
 ## Fonts and text encodings
 
 System fonts are enabled. Repeat `--font-dir` to load additional TTF, OTF or
-TTC files from directories (not recursively). No fonts are bundled; supply
+TTC files from directories (not recursively). No subtitle fonts are bundled; supply
 appropriately licensed font files for consistent output on different systems.
 
 libass warnings, unavailable glyph diagnostics and detectable fallback failures

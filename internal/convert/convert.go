@@ -91,25 +91,9 @@ func Stream(ctx context.Context, path string, dst io.Writer, opt Options) (Resul
 	if err != nil {
 		return result, err
 	}
-	data, err := os.ReadFile(path)
+	text, times, err := readSource(path, opt)
 	if err != nil {
 		return result, err
-	}
-	text, err := subtitle.Decode(data, opt.Encoding)
-	if err != nil {
-		return result, err
-	}
-	var times []subtitle.Interval
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".srt":
-		doc, err := subtitle.SRT(text, opt.Width, opt.Height, opt.Style)
-		if err != nil {
-			return result, err
-		}
-		text, times = doc.Text, doc.Times
-	case ".ass", ".ssa":
-	default:
-		return result, fmt.Errorf("unsupported subtitle extension: %s", filepath.Ext(path))
 	}
 	r, err := render.New(opt.Width, opt.Height, opt.Fonts)
 	if err != nil {

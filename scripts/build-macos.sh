@@ -6,15 +6,17 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 install_dependencies=false
+build_gui=false
 
 usage() {
     cat <<'USAGE'
-Usage: bash scripts/build-macos.sh [--install-dependencies]
+Usage: bash scripts/build-macos.sh [--install-dependencies] [--gui]
 
 Check dependencies, statically link third-party libraries, run tests and vet,
 and create a single-executable package under dist/. No paths are required.
 
   --install-dependencies  Allow missing tools/libraries and private source builds.
+  --gui                  Also build and package the Fyne desktop app.
   -h, --help             Show this help without changing the environment.
 
 Homebrew must already be installed (https://brew.sh). If Apple command-line
@@ -30,13 +32,8 @@ fail() {
     exit 1
 }
 
-bundle_macos() {
-    local binary=$1 destination=$2 metadata=$3 imports count=0
-    local prefix formula found notice version tag modules dependency
-    if [[ -e "$destination" ]]; then
-        echo "output directory already exists: $destination" >&2
-        exit 1
-    fi
+audit_macos() {
+    local binary=$1 imports count=0 dependency
     imports=$(otool -L "$binary")
     while IFS= read -r dependency; do
         [[ -n "$dependency" ]] || continue
@@ -46,6 +43,17 @@ bundle_macos() {
         esac
     done < <(printf '%s\n' "$imports" | tail -n +2 | sed -E 's/^[[:space:]]*//; s/ \(compatibility version.*$//')
     [[ $count -gt 0 ]] || { echo "cannot verify Mach-O imports" >&2; exit 1; }
+    printf '%s\n' "$imports"
+}
+
+bundle_macos() {
+    local binary=$1 destination=$2 metadata=$3 imports
+    local prefix formula found notice version tag modules
+    if [[ -e "$destination" ]]; then
+        echo "output directory already exists: $destination" >&2
+        exit 1
+    fi
+    imports=$(audit_macos "$binary")
     mkdir -p "$destination/licenses"
     cp "$binary" "$destination/pgs-converter"
     printf '%s\n' "$imports" > "$destination/MACHO-IMPORTS.txt"
@@ -83,7 +91,8 @@ bundle_macos() {
         printf 'Linkage: static third-party archives; system libraries/frameworks remain dynamic.\n'
     } > "$destination/BUILD-INFO.txt"
     cat > "$destination/STATIC-LINKING.txt" <<'NOTICE'
-Fonts: system fonts or user-supplied --font-dir; no fonts bundled.
+Subtitle fonts: system fonts or user-supplied --font-dir; none bundled.
+The optional GUI embeds toolkit UI fonts; see licenses/go-modules.
 This is a development package, not a redistribution-compliance bundle.
 Before redistribution, audit all licenses and provide applicable corresponding
 sources and materials/instructions to relink with modified LGPL libraries.
@@ -103,6 +112,7 @@ fi
 for argument in "$@"; do
     case "$argument" in
         --install-dependencies) install_dependencies=true ;;
+        --gui) build_gui=true ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$argument" >&2; usage >&2; exit 2 ;;
     esac
@@ -243,6 +253,36 @@ go vet ./...
 mkdir -p "$build_dir" "$repo_root/dist"
 go build -trimpath -ldflags "$link_flags -X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" -o "$build_dir/pgs-converter" ./cmd/pgs-converter
 bundle_macos "$build_dir/pgs-converter" "$destination" "$metadata"
+if "$build_gui"; then
+    app="$destination/PGS Converter.app"
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+    gui_binary="$app/Contents/MacOS/pgs-converter-gui"
+    go build -trimpath -ldflags "$link_flags -X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" \
+        -o "$gui_binary" ./cmd/pgs-converter-gui
+    audit_macos "$gui_binary" > "$destination/GUI-MACHO-IMPORTS.txt"
+    go run ./cmd/package-licenses -output "$destination/licenses/go-modules"
+    cp -R "$destination/licenses" "$app/Contents/Resources/"
+    cp README.md README.zh-CN.md THIRD_PARTY_NOTICES "$app/Contents/Resources/"
+    cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>pgs-converter-gui</string>
+<key>CFBundleIdentifier</key><string>io.github.ninghaofeng.pgs-converter</string>
+<key>CFBundleName</key><string>PGS Converter</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>11.0</string>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+PLIST
+    codesign --force --sign - "$gui_binary"
+    codesign --force --sign - "$app"
+    codesign --verify --deep --strict "$app"
+    "$gui_binary" -version
+    printf 'Desktop app: %s\n' "$app"
+fi
 isolated=$(mktemp -d "${TMPDIR:-/tmp}/pgs-static-smoke.XXXXXX")
 cp "$destination/pgs-converter" "$isolated/"
 (

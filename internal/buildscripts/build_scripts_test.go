@@ -49,6 +49,20 @@ func TestStaticCgoConfiguration(t *testing.T) {
 	}
 }
 
+func TestDesktopTargetPackages(t *testing.T) {
+	for _, target := range []struct{ os, arch string }{
+		{"windows", "amd64"}, {"windows", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"},
+	} {
+		t.Run(target.os+"/"+target.arch, func(t *testing.T) {
+			cmd := exec.Command("go", "list", "-deps", "../../cmd/pgs-converter-gui")
+			cmd.Env = append(os.Environ(), "GOOS="+target.os, "GOARCH="+target.arch, "CGO_ENABLED=1")
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("GUI target has unsupported package constraints: %v: %s", err, output)
+			}
+		})
+	}
+}
+
 func scriptPath(t *testing.T, name string) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("..", "..", "scripts", name))
@@ -70,6 +84,10 @@ func TestBuildScriptLayout(t *testing.T) {
 	for i, entry := range entries {
 		if entry.IsDir() || entry.Name() != want[i] {
 			t.Fatalf("unexpected scripts entry: %s, want %s", entry.Name(), want[i])
+		}
+		// Child-process file reads are not tracked by Go's test cache.
+		if _, err := os.ReadFile(scriptPath(t, entry.Name())); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -196,6 +214,9 @@ func TestPowerShellBuildHelpers(t *testing.T) {
 	}
 	testScript, err := filepath.Abs(filepath.Join("testdata", "windows.ps1"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(testScript); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", testScript)

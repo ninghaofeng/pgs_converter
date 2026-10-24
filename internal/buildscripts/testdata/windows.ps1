@@ -34,12 +34,13 @@ $allowedImports = @(
     "    DLL Name: KERNEL32.dll",
     "    DLL Name: DWrite.dll",
     "    DLL Name: ucrtbase.dll",
+    "    DLL Name: OPENGL32.dll",
     "    DLL Name: api-ms-win-crt-runtime-l1-1-0.dll",
     "    DLL Name: ext-ms-win-ntuser-window-l1-1-0.dll"
 )
 $audited = @(Assert-WindowsStaticImports $allowedImports)
-Assert ($audited.Count -eq 5) "System imports were not retained in audit output."
-foreach ($dll in @("libass-9.dll", "libfreetype-6.dll", "libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "msvcp140.dll", "unknown.dll", "../kernel32.dll")) {
+Assert ($audited.Count -eq 6) "System imports were not retained in audit output."
+foreach ($dll in @("libass-9.dll", "libfreetype-6.dll", "libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll", "libGLESv2.dll", "libEGL.dll", "msvcp140.dll", "unknown.dll", "../kernel32.dll")) {
     Assert-Throws { Assert-WindowsStaticImports ($allowedImports + "DLL Name: $dll") } "*non-allowlisted DLL*"
 }
 Assert-Throws { Assert-WindowsStaticImports @("not a PE import table") } "*no PE DLL imports*"
@@ -98,6 +99,22 @@ $global:LASTEXITCODE = 0
         New-WindowsBundle -Binary $binary -Prefix $root -Destination $rejectedBundle -Objdump $objdump
     } "*non-allowlisted DLL*"
     Assert (-not (Test-Path -LiteralPath $rejectedBundle)) "A failed import audit must not create a package."
+    $guiBinary = Join-Path $temp "gui.exe"
+    New-Item -ItemType File -Path $guiBinary | Out-Null
+    @'
+param([switch]$p, [string]$Binary)
+if ([System.IO.Path]::GetFileName($Binary) -eq "gui.exe") {
+    "    DLL Name: libGLESv2.dll"
+} else {
+    "    DLL Name: KERNEL32.dll"
+}
+$global:LASTEXITCODE = 0
+'@ | Set-Content -LiteralPath $objdump -Encoding Ascii
+    $rejectedGui = Join-Path $temp "rejected-gui-bundle"
+    Assert-Throws {
+        New-WindowsBundle -Binary $binary -GuiBinary $guiBinary -Prefix $root -Destination $rejectedGui -Objdump $objdump
+    } "*non-allowlisted DLL*"
+    Assert (-not (Test-Path -LiteralPath $rejectedGui)) "A failed GUI import audit must not create a package."
     @'
 param([string]$Mode, [string]$Binary)
 $global:LASTEXITCODE = 7
