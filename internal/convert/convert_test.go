@@ -175,17 +175,57 @@ func TestInvisibleStrictAndHDR(t *testing.T) {
 	}
 }
 
+func TestAnimatedTextStream(t *testing.T) {
+	opt := options()
+	opt.Width, opt.Height = 1280, 720
+	var first, second bytes.Buffer
+	result, err := Stream(context.Background(), "../../testdata/animated.ass", &first, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Stream(context.Background(), "../../testdata/animated.ass", &second, opt); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first.Bytes(), second.Bytes()) {
+		t.Fatal("animated text output is nondeterministic")
+	}
+	sets := compositions(t, first.Bytes())
+	if result.Frames < 30 || len(sets) != result.Frames {
+		t.Fatalf("text animation was lost: %d updates, %d compositions", result.Frames, len(sets))
+	}
+	for i, set := range sets {
+		if i > 0 && set.pts <= sets[i-1].pts {
+			t.Fatal("text animation timestamps are not increasing")
+		}
+	}
+	for _, pts := range []uint32{225000, 315000} {
+		found := false
+		for _, set := range sets {
+			if set.pts == pts && set.count == 0 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("text animation did not clear at %d", pts)
+		}
+	}
+}
+
 func TestFFmpegDecode(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("independent decoder unavailable: install FFmpeg to run interoperability test")
 	}
-	output := filepath.Join(t.TempDir(), "animated.sup")
+	// System-font glyph coverage varies by platform and can trigger lossy
+	// palette reduction. Keep the decoder's RGB limits independent of that
+	// quantization by using font-free drawings with at most 255 visible colors.
+	const fixture = "../../testdata/decoder.ass"
+	output := filepath.Join(t.TempDir(), "decoder.sup")
 	opt := options()
 	// FFmpeg guesses BT.601 for <=576-line subtitles. Use HD here so its
 	// independent decoder interprets this encoder's BT.709 palette as intended.
 	opt.Width, opt.Height = 1280, 720
-	result, err := File(context.Background(), "../../testdata/animated.ass", output, opt)
+	result, err := File(context.Background(), fixture, output, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +246,7 @@ func TestFFmpegDecode(t *testing.T) {
 	// Select representative fade/movement, overlap, gap and drawing frames.
 	// RGB overlay avoids adding chroma subsampling error to the palette check.
 	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-copyts", "-f", "lavfi", "-i", "color=black:s=1280x720:r=24:d=4,format=rgba",
-		"-i", output, "-filter_complex", "[0:v][1:s]overlay=format=rgb,select='eq(n,0)+eq(n,18)+eq(n,30)+eq(n,48)+eq(n,64)+eq(n,77)+eq(n,90)'",
+		"-i", output, "-filter_complex", "[0:v][1:s]overlay=format=rgb,select='eq(n,0)+eq(n,14)+eq(n,18)+eq(n,30)+eq(n,48)+eq(n,64)+eq(n,77)+eq(n,90)'",
 		"-t", "4", "-fps_mode", "passthrough", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -215,10 +255,10 @@ func TestFFmpegDecode(t *testing.T) {
 		t.Fatalf("independent decode: %v: %s", err, stderr.String())
 	}
 	frameSize := 1280 * 720 * 4
-	if len(raw) != 7*frameSize {
-		t.Fatalf("decoded %d bytes, expected %d", len(raw), 7*frameSize)
+	if len(raw) != 8*frameSize {
+		t.Fatalf("decoded %d bytes, expected %d", len(raw), 8*frameSize)
 	}
-	script, err := os.ReadFile("../../testdata/animated.ass")
+	script, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,11 +270,25 @@ func TestFFmpegDecode(t *testing.T) {
 	if _, err := r.Load(string(script)); err != nil {
 		t.Fatal(err)
 	}
-	for index, frame := range []int{0, 18, 30, 48, 64, 77, 90} {
+	for index, frame := range []int{0, 14, 18, 30, 48, 64, 77, 90} {
 		t.Run(strconv.Itoa(frame), func(t *testing.T) {
 			im, _, err := r.Frame(int64((frame*1000 + 23) / 24))
 			if err != nil {
 				t.Fatal(err)
+			}
+			colors := make(map[color.NRGBA]struct{})
+			if im != nil {
+				for y := im.Rect.Min.Y; y < im.Rect.Max.Y; y++ {
+					for x := im.Rect.Min.X; x < im.Rect.Max.X; x++ {
+						c := im.NRGBAAt(x, y)
+						if c.A != 0 {
+							colors[c] = struct{}{}
+						}
+					}
+				}
+			}
+			if len(colors) > 255 {
+				t.Fatalf("decoder fixture requires lossy quantization: %d visible colors", len(colors))
 			}
 			expected := image.NewRGBA(image.Rect(0, 0, 1280, 720))
 			draw.Draw(expected, expected.Rect, image.NewUniform(color.Black), image.Point{}, draw.Src)

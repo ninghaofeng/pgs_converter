@@ -279,6 +279,11 @@ that test reports a skip. The test preserves source timestamps with `-copyts`,
 compares decoded HD frames to libass source frames on black, checks blank
 frames for exact absence of residue, and limits active-pixel mean RGB error
 to 2 and peak component error to 16. Font availability can affect renderings.
+The decoder fixture uses animated ASS vector drawings and asserts at most 255
+visible source colors per sampled frame, isolating decoder accuracy from
+system-font differences and lossy palette reduction. Text movement, fades,
+karaoke and clearing are covered separately by the animated-text stream test;
+lossy quantization quality has its own numeric regression limits below.
 Other tests cover millisecond timing, SSA input, literal escaping, overlapping
 events, RLE boundaries, ODS fragmentation, deterministic quantization, output
 protection, cancellation and mixed-result batches.
