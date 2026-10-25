@@ -529,6 +529,20 @@ Remaining release gates: clean-machine tests on all four targets, native
 dependency source/version pinning, an actual player smoke test,
 long-duration performance characterization, and a chosen HDR playback chain.
 
+### Release drafts
+
+After committing a release version, push a stable tag such as `v1.0.0`.
+The existing workflow builds all four platforms and checks that each packaged
+CLI version matches the tag. Only after every build succeeds does it verify
+the package checksums and create a **draft**, not a public release.
+The draft contains versioned Windows/macOS archives and `SHA256SUMS`.
+Reruns can refresh draft assets without replacing manually edited notes;
+already published releases are never overwritten.
+
+Review the draft in GitHub Releases, complete the release gates and third-party
+source/relinking materials, then publish it manually. Creating a draft does not
+certify redistribution compliance or platform/player compatibility.
+
 Local macOS ARM64 smoke measurements at 1920x1080 / 24 fps: a one-hour static
 subtitle produced two display sets, an approximately 11 KiB file and 22 MiB
 peak RSS; a one-minute moving HDR subtitle produced 1,441 display sets, an

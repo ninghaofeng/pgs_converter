@@ -32,9 +32,22 @@ jobs:
           export PKG_CONFIG_PATH="$PWD/build/native/macos-${{ matrix.arch }}/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
           go test -race -ldflags "-linkmode=external -extld=/usr/bin/clang++" ./...
+      - name: Verify release binary version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          binaries=(dist/pgs-converter-macos-${{ matrix.arch }}-static-*/pgs-converter)
+          [[ ${#binaries[@]} == 1 && -f "${binaries[0]}" ]]
+          actual=$("${binaries[0]}" version)
+          expected="${GITHUB_REF_NAME#v}"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::Binary version $actual does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
+          if-no-files-found: error
           path: |
             dist/*.tar.gz
             dist/*.sha256
@@ -71,9 +84,84 @@ jobs:
       - name: Build, audit and test standalone static executable
         shell: pwsh
         run: ./scripts/build-windows.ps1 -Msys2Root "${{ steps.msys.outputs.msys2-location }}"
+      - name: Verify release binary version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $binaries = @(Get-ChildItem "dist/pgs-converter-windows-${{ matrix.arch }}-static-*/pgs-converter.exe")
+          if ($binaries.Count -ne 1) { throw "Expected exactly one packaged CLI" }
+          $actual = & $binaries[0].FullName version
+          if ($LASTEXITCODE -ne 0) { throw "Cannot read packaged binary version" }
+          $expected = $env:GITHUB_REF_NAME.Substring(1)
+          if ($actual -cne $expected) { throw "Binary version $actual does not match tag $env:GITHUB_REF_NAME" }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}
+          if-no-files-found: error
           path: |
             dist/*.zip
             dist/*.sha256
+
+  release:
+    name: Prepare release draft
+    needs: [macos, windows]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Verify packages and prepare versioned assets
+        run: go run ./cmd/release-assets -tag "$GITHUB_REF_NAME" -input artifacts -output release
+      - name: Create or update draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_NOTES: |
+            ## PGS Converter
+
+            Convert SRT, ASS and SSA subtitles to PGS/SUP with the CLI or bilingual desktop UI.
+            Download the archive for your platform and verify it against SHA256SUMS.
+
+            **Manual review required before publishing**
+            - Verify all four platform packages and clean-machine/player smoke tests.
+            - HDR palette output remains experimental; player HDR interpretation is not certified.
+            - macOS uses ad-hoc signing, not Developer ID signing/notarization; Windows is unsigned.
+            - Review LICENSE and THIRD_PARTY_NOTICES. Static LGPL source/relinking materials
+              are not automatically generated and must be reviewed before public distribution.
+
+            ## 发布前人工确认
+
+            请核对四个平台的附件及 SHA256SUMS，并完成干净环境和播放器测试。
+            HDR 仍为实验性功能；程序未完成正式平台签名。
+            公开发布前仍需核对第三方许可、LGPL 对应源码和重新链接材料。
+        shell: bash
+        run: |
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | [.id, .draft] | @tsv")
+          if [[ -n "$existing" ]]; then
+            if [[ "$existing" != *$'\ttrue' ]]; then
+              echo "::error::Refusing to modify an already published release"
+              exit 1
+            fi
+            # Preserve any release notes already edited during manual review.
+            gh release upload "$GITHUB_REF_NAME" release/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag \
+              --title "PGS Converter $GITHUB_REF_NAME" \
+              --notes "$RELEASE_NOTES" --generate-notes
+          fi
+          gh release view "$GITHUB_REF_NAME" --json url,isDraft,assets \
+            --jq '{url, isDraft, assets: [.assets[].name]}'
+          url=$(gh release view "$GITHUB_REF_NAME" --json url --jq .url)
+          printf '## Release draft\n\n%s\n\nManual review and publication required.\n' "$url" >> "$GITHUB_STEP_SUMMARY"
