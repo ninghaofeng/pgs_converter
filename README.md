@@ -38,6 +38,8 @@ macOS application bundle. The source is `internal/desktop/assets/icon.svg`;
 after editing it, run `go run ./cmd/app-icon` from the repository root to
 regenerate PNG/ICO/ICNS and both Windows architecture resources. Generated
 assets are checked in, so ordinary builds need no icon-generation tools.
+Tests verify decoded pixels and ICO/ICNS structure rather than compressed PNG
+bytes, which can differ between Go versions without changing the images.
 
 The interface supports **English and Simplified Chinese**. On first launch,
 Chinese system locales select Simplified Chinese; other locales select English.
