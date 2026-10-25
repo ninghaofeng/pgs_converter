@@ -79,6 +79,8 @@ Settings are snapshotted per run. Cancellation is checked between frames and
 may wait for a native render call; closing during conversion waits for output
 cleanup. There is no pause/resume, video playback, per-file setting override,
 or task persistence in this initial version. Logs retain the latest 500 entries.
+The read-only log uses normal foreground text instead of dimmed disabled text,
+following light/dark themes and UI scaling for readability.
 The overall progress bar is equal-task-weighted, not an ETA.
 
 GUI packages retain static third-party native linking and reject third-party

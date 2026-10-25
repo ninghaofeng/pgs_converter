@@ -26,6 +26,10 @@ func desktopButton(object fyne.CanvasObject, text string) *widget.Button {
 		children = []fyne.CanvasObject{object.Leading, object.Trailing}
 	case *container.Scroll:
 		children = []fyne.CanvasObject{object.Content}
+	case *container.AppTabs:
+		for _, item := range object.Items {
+			children = append(children, item.Content)
+		}
 	}
 	for _, child := range children {
 		if button := desktopButton(child, text); button != nil {

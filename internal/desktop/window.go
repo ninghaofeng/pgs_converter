@@ -312,7 +312,7 @@ func (w *window) build(c Config) {
 		nil, nil, nil, container.NewStack(canvas.NewRectangle(color.Black), w.previewImage))
 	logPanel := container.NewBorder(container.NewHBox(w.button("Copy log", func() {
 		w.app.Clipboard().SetContent(strings.Join(w.logLines, "\n"))
-	})), nil, nil, nil, w.log)
+	})), nil, nil, nil, container.NewThemeOverride(w.log, logTheme{settings: w.app.Settings()}))
 	tabs := container.NewAppTabs(container.NewTabItem(w.tr("Subtitle preview"), preview), container.NewTabItem(w.tr("Log / error details"), logPanel))
 	w.translators = append(w.translators, func() {
 		tabs.Items[0].Text = w.tr("Subtitle preview")
