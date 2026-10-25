@@ -1,0 +1,70 @@
+Third-party components
+======================
+
+PGS Converter's original code and documentation are licensed under the
+Apache License, Version 2.0, unless otherwise noted. Copyright (c) 2026
+ninghaofeng. See the project LICENSE included with the source and packages.
+Third-party components retain their own licenses; the project license does
+not replace their notices or redistribution obligations.
+
+This project calls libass through cgo. Binary redistributors must include
+the applicable license notices for every native library shipped in a package.
+The packaging scripts collect installed notices; the resulting archive must
+be audited before public redistribution. No subtitle font files are bundled.
+The optional Fyne GUI embeds toolkit UI fonts, with their upstream notices
+collected under licenses/go-modules along with its transitive Go dependencies.
+
+Application icon:
+
+* Google Material Icons, "subtitles": Apache-2.0
+  https://github.com/google/material-design-icons
+  Original: src/av/subtitles/materialicons/24px.svg
+  Modified with a white glyph, blue/teal background and application-icon layout.
+  Full license: licenses/material-icons/LICENSE in desktop packages.
+  Source license: internal/desktop/assets/LICENSE-material-icons.
+
+Direct Go dependencies (versions are recorded in go.mod and go.sum):
+
+* github.com/go-text/typesetting: Unlicense OR BSD-3-Clause; font metadata scanning
+  https://github.com/go-text/typesetting/blob/v0.3.5/LICENSE
+* fyne.io/fyne/v2: BSD-3-Clause; bundled UI fonts and graphics sources have
+  their own notices, collected recursively from the runtime dependency graph
+  https://github.com/fyne-io/fyne/blob/master/LICENSE
+* github.com/spf13/pflag: BSD-3-Clause
+  https://github.com/spf13/pflag/blob/master/LICENSE
+* github.com/ncruces/zenity: MIT; Windows native file dialogs only
+  https://github.com/ncruces/zenity/blob/v0.10.14/LICENSE
+* golang.org/x/text: BSD-3-Clause; some data files have additional notices
+  https://go.googlesource.com/text/+/refs/heads/master/LICENSE
+
+Native renderer and common transitive components:
+
+* libass: ISC
+  https://github.com/libass/libass/blob/master/COPYING
+* FreeType: FreeType License or GPL-2.0; use the FreeType License option
+  https://freetype.org/license.html
+  Portions of this software are copyright (c) The FreeType Project
+  (https://freetype.org/). All rights reserved.
+* HarfBuzz: MIT-style; see its complete COPYING file
+  https://github.com/harfbuzz/harfbuzz/blob/main/COPYING
+* FriBidi: LGPL-2.1-or-later
+  https://github.com/fribidi/fribidi/blob/master/COPYING
+
+The exact native dependency graph depends on the platform and installed
+packages. Build information is included in generated packages. Windows and
+macOS builds statically link third-party native libraries into the executable.
+Only operating-system libraries/frameworks remain dynamically linked.
+No subtitle font files are bundled. The private macOS Graphite2 build uses the MIT
+license option; its version and source checksum are recorded in the package.
+
+Static development packages are NOT complete redistribution-compliance
+bundles. LGPL components can include FriBidi and, through HarfBuzz, GLib.
+Before redistribution, audit every linked component and provide the applicable
+corresponding sources, notices, and object files or other relinking materials
+and instructions needed to relink with modified LGPL libraries. Preserve
+users' applicable modification/reverse-engineering rights. The build scripts
+collect notices but do not automatically prepare these source/relinking
+materials. This requirement is not removed by shipping only one executable.
+
+FFmpeg is used only for development tests and is not bundled by this project.
+Its own license depends on its build configuration.
