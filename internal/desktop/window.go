@@ -36,6 +36,7 @@ type row struct {
 
 type window struct {
 	app            fyne.App
+	version        string
 	win            fyne.Window
 	files          []string
 	rows           []row
@@ -76,7 +77,7 @@ type window struct {
 
 func New(a fyne.App, version string, inputs ...string) fyne.Window {
 	a.SetIcon(applicationIcon)
-	w := &window{app: a, win: a.NewWindow("PGS Converter"), selected: -1, previewGate: make(chan struct{}, 1)}
+	w := &window{app: a, version: version, win: a.NewWindow("PGS Converter"), selected: -1, previewGate: make(chan struct{}, 1)}
 	w.win.SetIcon(applicationIcon)
 	var languageErr error
 	w.language, languageErr = initialLanguage(a.Preferences().String("desktop-language"), lang.SystemLocale().String())
@@ -345,7 +346,8 @@ func (w *window) build(c Config) {
 		w.chooseFolder(func(path string) { w.output.SetText(path) })
 	}), w.output)
 	footer := container.NewVBox(output, w.label("Flat output folder; duplicate basenames are rejected. 4K: start with concurrency 1 or 2."),
-		w.progress, w.status, container.NewHBox(w.start, w.cancelButton))
+		w.progress, w.status, container.NewBorder(nil, nil, container.NewHBox(w.start, w.cancelButton),
+			w.button("About PGS Converter", w.showAbout)))
 	w.win.SetContent(container.NewBorder(nil, footer, nil, nil, main))
 	for _, field := range []*widget.Entry{w.font, w.fontSize, w.margin, w.fonts} {
 		field.OnChanged = func(string) { w.scheduleStylePreview() }

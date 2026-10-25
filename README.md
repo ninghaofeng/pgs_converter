@@ -115,6 +115,11 @@ collected from the Go dependency graph. CI builds the GUI on all four targets;
 native graphics, drag/drop, IME and high-DPI acceptance, particularly on
 Windows ARM64, must still be verified on real target systems.
 
+**About PGS Converter**, at the bottom right, displays version **1.0.0**,
+author **ninghaofeng**, and `Copyright © 2026 ninghaofeng.` The dialog follows
+the selected interface language. Third-party components retain their own
+copyrights and licenses; see the notices included with the application.
+
 ## Build
 
 ### Recommended: one-command build and package

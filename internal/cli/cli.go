@@ -19,8 +19,8 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Version is replaced by release builds using -ldflags "-X .../cli.Version=...".
-var Version = "dev"
+// Version is the display version, overridable with -ldflags "-X .../cli.Version=...".
+var Version = "1.0.0"
 
 // Run executes CLI arguments without the executable name and never calls os.Exit.
 // It returns 0 for success/help/version, 1 for conversion failures, 2 for invalid

@@ -10,6 +10,15 @@ import (
 	"testing"
 )
 
+func TestReleaseVersion(t *testing.T) {
+	for _, arg := range []string{"version", "--version"} {
+		var stdout, stderr bytes.Buffer
+		if code := Run(context.Background(), []string{arg}, &stdout, &stderr); code != 0 || stdout.String() != "1.0.0\n" || stderr.Len() != 0 {
+			t.Fatalf("version %s: code=%d stdout=%q stderr=%q", arg, code, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestMissingASSFontsWarnOrFailStrict(t *testing.T) {
 	source, err := os.ReadFile("../../testdata/decoder.ass")
 	if err != nil {

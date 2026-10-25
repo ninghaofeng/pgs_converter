@@ -117,6 +117,12 @@ func (w *window) setLanguage(code string) {
 }
 
 var translations = map[string]string{
+	"About PGS Converter":           "关于 PGS Converter",
+	"Close":                         "关闭",
+	"Version: %s":                   "版本：%s",
+	"Author: %s":                    "作者：%s",
+	"Copyright © 2026 ninghaofeng.": "版权所有 © 2026 ninghaofeng。",
+	"Third-party components retain their own copyrights and licenses. See THIRD_PARTY_NOTICES and the licenses folder in the application package.": "第三方组件的版权和许可证归各自权利人所有。详见应用程序包中的 THIRD_PARTY_NOTICES 和 licenses 目录。",
 	"Missing required fonts: %s":                                               "缺少所需字体：%s",
 	"Checking required subtitle fonts...":                                      "正在检查字幕所需字体…",
 	"Font preflight failed: %v":                                                "字体预检失败：%v",

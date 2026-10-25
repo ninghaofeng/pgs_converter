@@ -251,13 +251,13 @@ printf 'Building macOS %s (static) with %s and libass %s\n' "$arch" "$(go versio
 go test -ldflags "$link_flags" ./...
 go vet ./...
 mkdir -p "$build_dir" "$repo_root/dist"
-go build -trimpath -ldflags "$link_flags -X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" -o "$build_dir/pgs-converter" ./cmd/pgs-converter
+go build -trimpath -ldflags "$link_flags" -o "$build_dir/pgs-converter" ./cmd/pgs-converter
 bundle_macos "$build_dir/pgs-converter" "$destination" "$metadata"
 if "$build_gui"; then
     app="$destination/PGS-Converter.app"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     gui_binary="$app/Contents/MacOS/pgs-converter-gui"
-    go build -trimpath -ldflags "$link_flags -X github.com/ninghaofeng/pgs_converter/internal/cli.Version=${GITHUB_SHA:-dev}" \
+    go build -trimpath -ldflags "$link_flags" \
         -o "$gui_binary" ./cmd/pgs-converter-gui
     audit_macos "$gui_binary" > "$destination/GUI-MACHO-IMPORTS.txt"
     go run ./cmd/package-licenses -output "$destination/licenses/go-modules"
@@ -266,7 +266,8 @@ if "$build_gui"; then
     cp -R "$destination/licenses" "$app/Contents/Resources/"
     cp internal/desktop/assets/icon.icns "$app/Contents/Resources/Icon.icns"
     cp README.md README.zh-CN.md THIRD_PARTY_NOTICES "$app/Contents/Resources/"
-    cat > "$app/Contents/Info.plist" <<'PLIST'
+    app_version=$("$destination/pgs-converter" version)
+    cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -275,8 +276,8 @@ if "$build_gui"; then
 <key>CFBundleName</key><string>PGS Converter</string>
 <key>CFBundleIconFile</key><string>Icon.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>$app_version</string>
+<key>CFBundleVersion</key><string>$app_version</string>
 <key>LSMinimumSystemVersion</key><string>11.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

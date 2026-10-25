@@ -322,9 +322,7 @@ function Invoke-WindowsBuild {
         $destination = Join-Path $repo "dist/$packageName"
         New-Item -ItemType Directory -Force -Path $build, (Join-Path $repo "dist") | Out-Null
         $binary = Join-Path $build "pgs-converter.exe"
-        $version = "dev"
-        if ($env:GITHUB_SHA) { $version = $env:GITHUB_SHA }
-        $buildFlags = "-X github.com/ninghaofeng/pgs_converter/internal/cli.Version=$version $($link.LinkerFlags)"
+        $buildFlags = $link.LinkerFlags
         Invoke-CheckedNative $go.Path @("build", "-trimpath", "-ldflags", $buildFlags, "-o", $binary, "./cmd/pgs-converter")
         $guiBinary = $null
         if ($WithGui) {
