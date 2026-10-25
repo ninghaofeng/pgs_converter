@@ -16,10 +16,12 @@ import (
 	"image/draw"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unsafe"
 
 	"github.com/ninghaofeng/pgs_converter/internal/colorx"
+	"github.com/ninghaofeng/pgs_converter/internal/fontinfo"
 	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
 )
 
@@ -103,6 +105,37 @@ func (r *Renderer) Diagnostics() []string {
 		return nil
 	}
 	return strings.Split(strings.TrimSpace(text), "\n")
+}
+
+// RequiredFonts reads parsed styles/events so ASS and SSA format variants share libass's parser.
+func (r *Renderer) RequiredFonts() []string {
+	track := r.ptr.track
+	styles := unsafe.Slice(track.styles, int(track.n_styles))
+	byName := make(map[string]string, len(styles))
+	for _, style := range styles {
+		byName[C.GoString(style.Name)] = C.GoString(style.FontName)
+	}
+	names := make(map[string]string)
+	add := func(name string) {
+		name = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(name), "@"))
+		if name != "" {
+			names[strings.ToLower(name)] = name
+		}
+	}
+	for _, event := range unsafe.Slice(track.events, int(track.n_events)) {
+		if event.Style >= 0 && int(event.Style) < len(styles) {
+			add(C.GoString(styles[event.Style].FontName))
+		}
+		for _, name := range fontinfo.InlineFonts(C.GoString(event.Text), byName) {
+			add(name)
+		}
+	}
+	fonts := make([]string, 0, len(names))
+	for _, name := range names {
+		fonts = append(fonts, name)
+	}
+	slices.Sort(fonts)
+	return fonts
 }
 
 // Load parses one UTF-8 ASS/SSA script and returns events in libass track order.

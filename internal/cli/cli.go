@@ -56,7 +56,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&opt.Style.Font, "font", "sans-serif", "SRT font family (ASS/SSA retain script styles)")
 	flags.IntVar(&opt.Style.Size, "font-size", 0, "SRT font size (default canvas height / 24)")
 	flags.IntVar(&opt.Style.Margin, "margin", -1, "SRT margin in pixels (default canvas height / 24)")
-	flags.BoolVar(&opt.Strict, "strict", false, "Fail on libass diagnostics or invisible short events")
+	flags.BoolVar(&opt.Strict, "strict", false, "Fail on missing ASS/SSA fonts, libass diagnostics or invisible short events")
 	flags.BoolVar(&opt.Overwrite, "overwrite", false, "Replace existing outputs only after successful conversion")
 	flags.BoolVar(&recursive, "recursive", false, "Recursively discover batch subtitles")
 	flags.IntVar(&workers, "jobs", 1, "Concurrent batch conversions (1..32)")

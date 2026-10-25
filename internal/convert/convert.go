@@ -127,6 +127,18 @@ func Stream(ctx context.Context, path string, dst io.Writer, opt Options) (Resul
 		}
 		intervals = times
 	}
+	if times == nil {
+		report, err := checkTrackFonts(ctx, text, r, opt.Fonts)
+		if err != nil {
+			return result, err
+		}
+		for _, warning := range report.Diagnostics() {
+			if !seenWarnings[warning] {
+				result.Warnings = append(result.Warnings, warning)
+				seenWarnings[warning] = true
+			}
+		}
+	}
 	if err := check(); err != nil {
 		return result, err
 	}

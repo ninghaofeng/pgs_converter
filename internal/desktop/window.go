@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -44,6 +45,8 @@ type window struct {
 	closing        bool
 	cancel         context.CancelFunc
 	previewCancel  context.CancelFunc
+	fontCancel     context.CancelFunc
+	styleTimer     *time.Timer
 	pickerCancel   context.CancelFunc
 	openPicker     func(context.Context, fyne.Window, nativepicker.Request, func([]string, error))
 	previewID      int
@@ -122,6 +125,12 @@ func New(a fyne.App, version string, inputs ...string) fyne.Window {
 		}
 		if w.pickerCancel != nil {
 			w.pickerCancel()
+		}
+		if w.fontCancel != nil {
+			w.fontCancel()
+		}
+		if w.styleTimer != nil {
+			w.styleTimer.Stop()
 		}
 		w.previewID++
 		w.win.SetCloseIntercept(nil)
@@ -282,7 +291,7 @@ func (w *window) build(c Config) {
 		w.formItem("Color profile", w.profile),
 		w.formItem("HDR white (nits)", w.white),
 		w.formItem("Input encoding", w.encoding),
-		w.formItem("SRT font family", w.font),
+		w.formItem("SRT font family", container.NewBorder(nil, nil, nil, w.button("Choose font", w.chooseFont), w.font)),
 		w.formItem("SRT font size", w.fontSize),
 		w.formItem("SRT margin", w.margin),
 		w.formItem("Font folders (one per line)", w.fonts),
@@ -336,6 +345,9 @@ func (w *window) build(c Config) {
 	footer := container.NewVBox(output, w.label("Flat output folder; duplicate basenames are rejected. 4K: start with concurrency 1 or 2."),
 		w.progress, w.status, container.NewHBox(w.start, w.cancelButton))
 	w.win.SetContent(container.NewBorder(nil, footer, nil, nil, main))
+	for _, field := range []*widget.Entry{w.font, w.fontSize, w.margin, w.fonts} {
+		field.OnChanged = func(string) { w.scheduleStylePreview() }
+	}
 }
 
 func (w *window) config() Config {
@@ -472,15 +484,26 @@ func (w *window) run() {
 	}
 	w.app.Preferences().SetString("desktop-settings", string(saved))
 	ctx, cancel := context.WithCancel(context.Background())
+	w.active, w.cancel = true, cancel
+	w.start.Disable()
+	w.cancelButton.Enable()
+	w.say(w.status, "Checking required subtitle fonts...")
+	w.preflightFonts(ctx, cancel, jobs, opt, workers, c)
+}
+
+func (w *window) startConversions(ctx context.Context, cancel context.CancelFunc, jobs []batch.Job, opt convert.Options, workers int, c Config) {
+	if ctx.Err() != nil {
+		cancel()
+		w.finish(true)
+		return
+	}
 	events, err := batch.Run(ctx, jobs, opt, workers, true)
 	if err != nil {
 		cancel()
 		w.showError(err)
+		w.finish(false)
 		return
 	}
-	w.active, w.cancel = true, cancel
-	w.start.Disable()
-	w.cancelButton.Enable()
 	w.say(w.status, "Converting with snapshotted settings...")
 	w.appendLog(fmt.Sprintf("START: %d files; %s; %s fps; %s; concurrency %d", len(jobs), c.Size, c.FPS, c.Profile, workers))
 	if opt.Profile.HDR {
@@ -573,6 +596,13 @@ func (w *window) finish(cancelled bool) {
 		if w.pickerCancel != nil {
 			w.pickerCancel()
 		}
+		if w.fontCancel != nil {
+			w.fontCancel()
+		}
+		if w.styleTimer != nil {
+			w.styleTimer.Stop()
+		}
+		w.previewID++
 		w.win.SetCloseIntercept(nil)
 		w.win.Close()
 	}

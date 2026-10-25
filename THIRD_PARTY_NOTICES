@@ -10,6 +10,8 @@ collected under licenses/go-modules along with its transitive Go dependencies.
 
 Direct Go dependencies (versions are recorded in go.mod and go.sum):
 
+* github.com/go-text/typesetting: Unlicense OR BSD-3-Clause; font metadata scanning
+  https://github.com/go-text/typesetting/blob/v0.3.5/LICENSE
 * fyne.io/fyne/v2: BSD-3-Clause; bundled UI fonts and graphics sources have
   their own notices, collected recursively from the runtime dependency graph
   https://github.com/fyne-io/fyne/blob/master/LICENSE

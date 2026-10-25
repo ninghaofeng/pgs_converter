@@ -75,6 +75,24 @@ It is **SDR style preview only**, not SUP palette/quantization preview and not
 HDR luminance simulation or HDR playback certification. ASS/SSA retain their
 own styles. Preview renderers are isolated from conversion workers.
 
+For SRT, **Choose font** opens a searchable family list scanned in the background
+from system font folders and the configured extra font folders. Font names come
+from the fonts' metadata (including TTC collections), not file names. Extra
+folders are scanned non-recursively, matching export. You may still enter a
+family name manually. Scan warnings appear in the log; unavailable glyphs or
+fonts may cause libass fallback, so the preview is the actual rendered result,
+not a guarantee of a particular font's complete glyph coverage.
+Changing the font, size, margin or extra font folders automatically refreshes
+the selected SRT preview after a short typing pause, keeping the current preview
+time. Incomplete settings show an inline prompt instead of repeated error
+dialogs. ASS/SSA styles and already-running conversion settings are unchanged.
+
+Before an ASS/SSA batch starts, the app checks the referenced subtitle fonts.
+If fonts are missing, a dialog lists them by input file: **Continue with font
+fallback** allows substitution, while **Cancel conversion** writes no outputs.
+Strict mode blocks conversion instead of offering fallback. Add the missing
+fonts through the extra font folders and retry.
+
 Settings are snapshotted per run. Cancellation is checked between frames and
 may wait for a native render call; closing during conversion waits for output
 cleanup. There is no pause/resume, video playback, per-file setting override,
@@ -341,11 +359,22 @@ System fonts are enabled. Repeat `--font-dir` to load additional TTF, OTF or
 TTC files from directories (not recursively). No subtitle fonts are bundled; supply
 appropriately licensed font files for consistent output on different systems.
 
+ASS/SSA conversion checks fonts before rendering frames, using the styles
+referenced by dialogue, inline `\fn` changes and named `\r` style resets.
+Unused styles and comments are ignored. System font folders, configured extra
+folders and ASS/SSA embedded fonts are checked by font metadata, including
+localized family, full and PostScript names, not attachment/file names.
+CLI conversion warns and continues with libass fallback by default;
+`--strict` fails before rendering if required fonts are missing.
 libass warnings, unavailable glyph diagnostics and detectable fallback failures
-are reported. `--strict` turns these diagnostics and invisible short events
-into file failures. Normal system font selection may substitute a family
-without emitting a warning; strict mode is **not a guarantee** of exact font
-identity or a complete font-coverage preflight.
+are also reported; strict mode rejects these and invisible short events.
+
+This is a font-name availability check, not a guarantee of glyph coverage,
+the exact weight/style face or the font selected by the OS renderer.
+An event's base style font is checked even if an inline override replaces it
+before visible text. Fonts installed outside the conventional system font
+folders may need an explicit `--font-dir`. Fonts attached to an MKV must first
+be extracted into a configured font folder. No font files are downloaded.
 
 `--encoding auto` accepts UTF-8 (with or without BOM) and BOM-marked UTF-16.
 Explicit choices: `utf-8`, `utf-16le`, `utf-16be`, `gb18030`, `big5`.

@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
@@ -95,8 +96,41 @@ Dialogue: Marked=0,0:00:00.50,0:00:01.50,Default,,0,0,0,,SSA subtitle
 	if err != nil || len(events) != 1 || events[0].Start != 500 || events[0].End != 1500 {
 		t.Fatalf("SSA events: %v %v", events, err)
 	}
+	if fonts := r.RequiredFonts(); !slices.Equal(fonts, []string{"sans-serif"}) {
+		t.Fatalf("SSA required fonts: %v", fonts)
+	}
 	im, _, err := r.Frame(1000)
 	if err != nil || im == nil {
 		t.Fatalf("SSA render failed: %v", err)
+	}
+
+}
+
+func TestRequiredFontsUseParsedStyleFormat(t *testing.T) {
+	const script = `[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 360
+[V4+ Styles]
+Format: Fontname, Fontsize, Name
+Style: Base Font,28,Default
+Style: Sign Font,28,Signs
+Style: Unused Font,28,Unused
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Comment: 0,0:00:00.50,0:00:01.50,Unused,,0,0,0,,{\fnComment Font}comment
+Dialogue: 0,0:00:00.50,0:00:01.50,Default,,0,0,0,,{\fnInline Font}Hello{\rSigns}Sign
+`
+	r, err := New(640, 360, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := r.Load(script); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Base Font", "Inline Font", "Sign Font"}
+	if got := r.RequiredFonts(); !slices.Equal(got, want) {
+		t.Fatalf("parsed font references: %v, want %v", got, want)
 	}
 }

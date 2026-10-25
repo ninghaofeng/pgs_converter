@@ -3,11 +3,46 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestMissingASSFontsWarnOrFailStrict(t *testing.T) {
+	source, err := os.ReadFile("../../testdata/decoder.ass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "missing.ass")
+	source = bytes.ReplaceAll(source, []byte("sans-serif"), []byte("PGS-CLI-Missing-Font-987"))
+	if err := os.WriteFile(path, source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, strict := range []bool{false, true} {
+		output := filepath.Join(t.TempDir(), "out.sup")
+		args := []string{"convert", path, "--size", "640x360", "--fps", "24", "-o", output}
+		wantCode := 0
+		if strict {
+			args = append(args, "--strict")
+			wantCode = 1
+		}
+		var stdout, stderr bytes.Buffer
+		code := Run(context.Background(), args, &stdout, &stderr)
+		if code != wantCode || !strings.Contains(stderr.String(), `required font "PGS-CLI-Missing-Font-987" was not found`) {
+			t.Fatalf("strict=%v: code=%d log=%s", strict, code, stderr.String())
+		}
+		info, err := os.Stat(output)
+		if strict {
+			if !errors.Is(err, os.ErrNotExist) || strings.Contains(stderr.String(), "progress:") {
+				t.Fatal("strict font preflight created output or started rendering")
+			}
+		} else if err != nil || info.Size() == 0 {
+			t.Fatal("normal font fallback did not produce output")
+		}
+	}
+}
 
 func TestArguments(t *testing.T) {
 	for _, args := range [][]string{
