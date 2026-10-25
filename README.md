@@ -9,6 +9,19 @@ layers, vector drawings, fades, movement, transforms and karaoke.
 This is an initial implementation, not a Blu-ray authoring/compliance tool.
 It does not encode video, perform OCR, or mux MKV files.
 
+## License
+
+Copyright (c) 2026 ninghaofeng.
+
+Unless otherwise noted, this project's original code and documentation are
+licensed under the [Apache License, Version 2.0](./LICENSE).
+Third-party libraries, fonts and icon assets retain their respective licenses;
+see [THIRD_PARTY_NOTICES](./THIRD_PARTY_NOTICES).
+The project license does not replace third-party redistribution obligations,
+including the source and relinking requirements of statically linked LGPL
+components. Packages include the project license; the macOS app also includes
+it in `Contents/Resources`.
+
 ## Desktop UI (initial version)
 
 An optional Fyne 2.8 desktop app shares the CLI's conversion engine and batch

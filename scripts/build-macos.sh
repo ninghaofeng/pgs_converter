@@ -82,7 +82,7 @@ bundle_macos() {
                 -o "$destination/licenses/freetype/FTL.TXT"
         fi
     done < "$metadata/native-prefixes.txt"
-    cp README.md README.zh-CN.md THIRD_PARTY_NOTICES "$destination/"
+    cp LICENSE README.md README.zh-CN.md THIRD_PARTY_NOTICES "$destination/"
     modules=$(go env GOMODCACHE)
     mkdir -p "$destination/licenses/pflag" "$destination/licenses/x-text" "$destination/licenses/go"
     cp "$modules/github.com/spf13/pflag@v1.0.6/LICENSE" "$destination/licenses/pflag/"
@@ -270,7 +270,7 @@ if "$build_gui"; then
     cp internal/desktop/assets/LICENSE-material-icons "$destination/licenses/material-icons/LICENSE"
     cp -R "$destination/licenses" "$app/Contents/Resources/"
     cp internal/desktop/assets/icon.icns "$app/Contents/Resources/Icon.icns"
-    cp README.md README.zh-CN.md THIRD_PARTY_NOTICES "$app/Contents/Resources/"
+    cp LICENSE README.md README.zh-CN.md THIRD_PARTY_NOTICES "$app/Contents/Resources/"
     app_version=$("$destination/pgs-converter" version)
     cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -109,7 +109,7 @@ function New-WindowsBundle {
         Copy-Item -LiteralPath "internal/desktop/assets/LICENSE-material-icons" -Destination "$Destination/licenses/material-icons/LICENSE"
         Invoke-CheckedNative "$Destination/pgs-converter-gui.exe" @("-version")
     }
-    Copy-Item README.md, README.zh-CN.md, THIRD_PARTY_NOTICES $Destination
+    Copy-Item LICENSE, README.md, README.zh-CN.md, THIRD_PARTY_NOTICES $Destination
     if (-not (Test-Path "$Prefix/share/licenses")) { throw "Native dependency licenses not found" }
     New-Item -ItemType Directory -Force -Path "$Destination/licenses" | Out-Null
     Copy-Item -Recurse "$Prefix/share/licenses/*" "$Destination/licenses"

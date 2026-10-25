@@ -1,6 +1,12 @@
 Third-party components
 ======================
 
+PGS Converter's original code and documentation are licensed under the
+Apache License, Version 2.0, unless otherwise noted. Copyright (c) 2026
+ninghaofeng. See the project LICENSE included with the source and packages.
+Third-party components retain their own licenses; the project license does
+not replace their notices or redistribution obligations.
+
 This project calls libass through cgo. Binary redistributors must include
 the applicable license notices for every native library shipped in a package.
 The packaging scripts collect installed notices; the resulting archive must

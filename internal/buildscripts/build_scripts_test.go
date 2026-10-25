@@ -104,6 +104,26 @@ func TestBuildScriptLayout(t *testing.T) {
 	}
 }
 
+func TestProjectLicensePackaging(t *testing.T) {
+	for _, tc := range []struct {
+		name, script, command string
+	}{
+		{"macos-archive", "build-macos.sh", `cp LICENSE README.md README.zh-CN.md THIRD_PARTY_NOTICES "$destination/"`},
+		{"macos-app", "build-macos.sh", `cp LICENSE README.md README.zh-CN.md THIRD_PARTY_NOTICES "$app/Contents/Resources/"`},
+		{"windows-archive", "build-windows.ps1", `Copy-Item LICENSE, README.md, README.zh-CN.md, THIRD_PARTY_NOTICES $Destination`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := os.ReadFile(scriptPath(t, tc.script))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), tc.command) {
+				t.Fatal("package must include the project's LICENSE alongside its documentation")
+			}
+		})
+	}
+}
+
 func TestMacRejectsDynamicPackages(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS Mach-O audit")
