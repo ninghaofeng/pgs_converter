@@ -26,6 +26,8 @@ import (
 	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
 )
 
+// row separates file completion from sampled progress: 100% sampling does not
+// mean the staged output has committed successfully.
 type row struct {
 	job       batch.Job
 	state     message
@@ -34,6 +36,8 @@ type row struct {
 	cancelled bool
 }
 
+// window is owned by Fyne's application thread. Workers capture immutable input
+// snapshots and return widget/state changes through fyne.Do.
 type window struct {
 	app            fyne.App
 	version        string
@@ -41,7 +45,7 @@ type window struct {
 	files          []string
 	rows           []row
 	selected       int
-	active         bool
+	active         bool // Covers font preflight, fallback consent and conversion.
 	scanning       bool
 	closing        bool
 	cancel         context.CancelFunc
@@ -50,8 +54,8 @@ type window struct {
 	styleTimer     *time.Timer
 	pickerCancel   context.CancelFunc
 	openPicker     func(context.Context, fyne.Window, nativepicker.Request, func([]string, error))
-	previewID      int
-	previewGate    chan struct{}
+	previewID      int           // Rejects stale callbacks even if native work outlives cancellation.
+	previewGate    chan struct{} // Serializes previews without blocking conversion workers.
 	intervals      []subtitle.Interval
 	logLines       []string
 	language       string
@@ -59,8 +63,8 @@ type window struct {
 	uiScale        int
 	scalePicker    *widget.Select
 	timestampBox   *fyne.Container
-	messages       map[*widget.Label]message
-	translators    []func()
+	messages       map[*widget.Label]message // Message keys/args permit retranslation of dynamic labels.
+	translators    []func()                  // Retranslates existing controls without rebuilding their state.
 
 	size, fps                          *widget.SelectEntry
 	profile, encoding                  *widget.Select
@@ -75,6 +79,8 @@ type window struct {
 	start, cancelButton, previewButton *widget.Button
 }
 
+// New creates an unshown window and restores preferences. version is displayed in
+// About, not the title. Initial inputs are discovered asynchronously like drops.
 func New(a fyne.App, version string, inputs ...string) fyne.Window {
 	a.SetIcon(applicationIcon)
 	w := &window{app: a, version: version, win: a.NewWindow("PGS Converter"), selected: -1, previewGate: make(chan struct{}, 1)}
@@ -110,6 +116,8 @@ func New(a fyne.App, version string, inputs ...string) fyne.Window {
 	})
 	w.win.SetCloseIntercept(func() {
 		if w.active {
+			// finish closes only after preflight or the batch collector has
+			// completed; closing now could abandon staged-output cleanup.
 			content := widget.NewLabel(w.tr("Cancel remaining work and close after temporary outputs are cleaned up?"))
 			content.Wrapping = fyne.TextWrapWord
 			d := dialog.NewCustomConfirm(w.tr("Conversion in progress"), w.tr("Cancel and close"), w.tr("Keep converting"), content, func(ok bool) {
@@ -429,6 +437,8 @@ func (w *window) add(paths []string) {
 	}()
 }
 
+// plan rebuilds the GUI's flat output mapping and invalidates the current preview.
+// It runs only when the queue is idle, so batch event indexes remain stable.
 func (w *window) plan() {
 	w.previewID++
 	if w.previewCancel != nil {
@@ -454,6 +464,8 @@ func (w *window) plan() {
 	w.say(w.detail, "Select a file to preview or remove it.")
 }
 
+// run validates and snapshots editable settings before any asynchronous preflight.
+// Later edits affect the next run or preview, not this batch's conversion options.
 func (w *window) run() {
 	if w.busy() {
 		return
@@ -519,6 +531,8 @@ func (w *window) startConversions(ctx context.Context, cancel context.CancelFunc
 		w.appendLog("WARNING: SDR uses BT.709; some players assume BT.601 at or below 576 lines.")
 	}
 	go func() {
+		// Keep consuming after cancellation: batch workers still send their
+		// terminal events after temporary-file cleanup.
 		for event := range events {
 			fyne.Do(func() { w.apply(event) })
 		}
@@ -528,6 +542,7 @@ func (w *window) startConversions(ctx context.Context, cancel context.CancelFunc
 	}()
 }
 
+// apply consumes events on the UI thread; only terminal success reaches progress 1.
 func (w *window) apply(event batch.Event) {
 	r := &w.rows[event.Index]
 	switch {
@@ -568,6 +583,8 @@ func (w *window) apply(event batch.Event) {
 	w.list.Refresh()
 }
 
+// finish restores controls after all conversion events, or after preflight aborts.
+// Undispatched inputs have no terminal event and are accounted for here.
 func (w *window) finish(cancelled bool) {
 	w.active, w.cancel = false, nil
 	w.start.Enable()
@@ -636,6 +653,8 @@ func (w *window) preview(first bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	w.previewCancel = cancel
+	// Cancellation cannot interrupt a native render. The generation check
+	// below also prevents an obsolete render from replacing newer UI state.
 	w.previewID++
 	id := w.previewID
 	w.say(w.previewStatus, "Rendering SDR style preview...")
@@ -649,6 +668,8 @@ func (w *window) preview(first bool) {
 		}
 		result, err := convert.Preview(ctx, path, opt, ms)
 		if first && err == nil && len(result.Intervals) > 0 {
+			// Scripts need not be time-sorted, so the first event is not
+			// necessarily the earliest subtitle.
 			ms = result.Intervals[0].Start
 			for _, interval := range result.Intervals {
 				ms = min(ms, interval.Start)

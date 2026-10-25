@@ -32,6 +32,8 @@ fail() {
     exit 1
 }
 
+# Resolve neither @rpath nor Homebrew paths at runtime: static packages may
+# import only macOS system libraries/frameworks, and an empty audit is a failure.
 audit_macos() {
     local binary=$1 imports count=0 dependency
     imports=$(otool -L "$binary")
@@ -53,6 +55,7 @@ bundle_macos() {
         echo "output directory already exists: $destination" >&2
         exit 1
     fi
+    # Reject unverifiable binaries before creating a success-shaped package.
     imports=$(audit_macos "$binary")
     mkdir -p "$destination/licenses"
     cp "$binary" "$destination/pgs-converter"
@@ -227,6 +230,8 @@ fi
 go run ./cmd/macos-static -pkg-config "$PKG_CONFIG" -sdk "$sdk_root" \
     -cellar "$("$brew_command" --cellar)" -output "$metadata" -extra-lib-dir "$extra_dir"
 export PKG_CONFIG_PATH="$metadata"
+# After archive resolution, isolate cgo from the original Homebrew .pc files;
+# otherwise a default search path could reintroduce dynamic -l dependencies.
 export PKG_CONFIG_LIBDIR="$metadata"
 
 # Unique package names make repeated invocations safe without deleting a prior
@@ -282,6 +287,7 @@ if "$build_gui"; then
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+    # Sign after all resources and version metadata have reached the bundle.
     codesign --force --sign - "$gui_binary"
     codesign --force --sign - "$app"
     codesign --verify --deep --strict "$app"
@@ -289,6 +295,8 @@ PLIST
     printf 'Desktop app: %s\n' "$app"
 fi
 isolated=$(mktemp -d "${TMPDIR:-/tmp}/pgs-static-smoke.XXXXXX")
+# Running away from the build tree with a minimal environment exposes accidental
+# reliance on Homebrew loader paths; the import audit remains the static gate.
 cp "$destination/pgs-converter" "$isolated/"
 (
     cd "$isolated"

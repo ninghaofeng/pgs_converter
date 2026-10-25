@@ -88,6 +88,7 @@ function New-WindowsBundle {
         [string]$GuiBinary
     )
     if (Test-Path $Destination) { throw "Output directory already exists: $Destination" }
+    # Audit both executables before creating a package directory.
     $imports = & $Objdump -p $Binary
     if ($LASTEXITCODE -ne 0) { throw "Cannot inspect imports of $Binary" }
     $verified = Assert-WindowsStaticImports $imports
@@ -140,6 +141,8 @@ function New-WindowsBundle {
     if ($LASTEXITCODE -ne 0) { throw "Packaged binary failed to start" }
 }
 
+# PowerShell's Stop preference alone does not make native nonzero exit codes
+# terminating errors on every supported PowerShell version.
 function Invoke-CheckedNative {
     param([string]$FilePath, [string[]]$Arguments)
     & $FilePath @Arguments
@@ -163,6 +166,8 @@ function Get-WindowsArchitecture {
 
 function Get-TargetConfiguration {
     param([string]$Architecture)
+    # Keep compiler, linker, libraries and import inspector from one MSYS2
+    # environment; mixing UCRT64 with CLANGARM64 produces incompatible binaries.
     switch ($Architecture.ToLowerInvariant()) {
         "x64" {
             return [pscustomobject]@{
@@ -339,6 +344,7 @@ function Invoke-WindowsBuild {
         $buildPath = $env:Path
         Push-Location -LiteralPath $isolated
         try {
+            # Do not let the build toolchain's PATH hide a runtime DLL dependency.
             $env:Path = "$env:SystemRoot\System32;$env:SystemRoot"
             foreach ($fixture in @("sample.srt", "animated.ass")) {
                 Invoke-CheckedNative "$isolated/pgs-converter.exe" @("convert", "$repo/testdata/$fixture", "--size", "3840x2160", "--fps", "24000/1001", "--overwrite", "-o", $smoke)

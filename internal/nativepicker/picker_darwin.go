@@ -40,6 +40,8 @@ func open(ctx context.Context, parent fyne.Window, request Request, complete fun
 			return
 		}
 		pending := &pendingPicker{ctx: ctx, complete: complete, done: make(chan struct{})}
+		// C retains only an opaque integer, never a Go pointer. The one native
+		// completion releases the handle even for cancellation or decode errors.
 		handle := cgo.NewHandle(pending)
 		title := C.CString(request.Title)
 		defer C.free(unsafe.Pointer(title))
@@ -58,6 +60,9 @@ func open(ctx context.Context, parent fyne.Window, request Request, complete fun
 	})
 }
 
+// pgs_picker_done copies callback-owned C strings before the native autorelease
+// pool ends. No returned path depends on the native JSON buffer's lifetime.
+//
 //export pgs_picker_done
 func pgs_picker_done(id C.uintptr_t, result, diagnostic *C.char) {
 	handle := cgo.Handle(id)

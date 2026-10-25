@@ -19,16 +19,21 @@ import (
 	"github.com/go-text/typesetting/fontscan"
 )
 
+// Catalog keeps display families separately from normalized lookup aliases.
+// Its zero value accepts embedded fonts. Mutation is not concurrency-safe.
 type Catalog struct {
 	Families []string
 	Warnings []string
 	names    map[string]bool
 }
 
+// normalize treats ASS's leading @ as a vertical-font marker, not part of a name.
 func normalize(name string) string {
 	return font.NormalizeFamily(strings.TrimPrefix(strings.TrimSpace(name), "@"))
 }
 
+// Generic recognizes provider-selected families that need no named-font match.
+// Accepting one does not establish that the provider covers every subtitle glyph.
 func Generic(name string) bool {
 	switch normalize(name) {
 	case "sans-serif", "serif", "monospace":
@@ -37,6 +42,7 @@ func Generic(name string) bool {
 	return false
 }
 
+// Has accepts generic families or any indexed family, full-name or PostScript alias.
 func (c *Catalog) Has(name string) bool { return Generic(name) || c.names[normalize(name)] }
 
 func (c *Catalog) add(resource opentype.Resource, system bool) error {
@@ -51,12 +57,15 @@ func (c *Catalog) add(resource opentype.Resource, system bool) error {
 			return fmt.Errorf("font has no family name")
 		}
 		if system && strings.HasPrefix(family, ".") {
+			// CoreText's private dot-prefixed families are not reliable names
+			// for selecting subtitle fonts through libass.
 			continue
 		}
 		raw, err := loader.RawTable(opentype.MustNewTag("name"))
 		if err != nil {
 			return err
 		}
+		// Publish a face only after its name records pass bounds validation.
 		aliases := Catalog{names: make(map[string]bool)}
 		if err := aliases.addNames(raw); err != nil {
 			return err
@@ -87,6 +96,8 @@ func (c *Catalog) addNames(raw []byte) error {
 	for i := 0; i < count; i++ {
 		record := raw[6+i*12 : 18+i*12]
 		id := binary.BigEndian.Uint16(record[6:])
+		// Legacy family, full, PostScript, typographic family and WWS family.
+		// Keep all language records rather than only the preferred English name.
 		if id != 1 && id != 4 && id != 6 && id != 16 && id != 21 {
 			continue
 		}
@@ -120,12 +131,18 @@ func (c *Catalog) addNames(raw []byte) error {
 	return nil
 }
 
+// AddEmbedded indexes font bytes, including collection faces; name labels errors
+// only. Invalid font metadata is retained as a warning instead of guessed by name.
 func (c *Catalog) AddEmbedded(name string, data []byte) {
 	if err := c.add(bytes.NewReader(data), false); err != nil {
 		c.Warnings = append(c.Warnings, fmt.Sprintf("embedded font %q: %v", name, err))
 	}
 }
 
+// Scan recursively inventories system roots and scans extra roots non-recursively,
+// matching renderer font loading. Individual font/system-path failures are warnings;
+// inaccessible extra roots and cancellation return an error and a partial catalog.
+// Cancellation is checked between entries, not inside a font parser call.
 func Scan(ctx context.Context, system, extra []string) (Catalog, error) {
 	c := Catalog{Families: []string{"sans-serif"}, names: make(map[string]bool)}
 	consume := func(path string, system bool) {
@@ -186,10 +203,13 @@ func Scan(ctx context.Context, system, extra []string) (Catalog, error) {
 	return c, ctx.Err()
 }
 
+// Printf collects fontscan diagnostics without writing from a background scan.
 func (c *Catalog) Printf(format string, args ...interface{}) {
 	c.Warnings = append(c.Warnings, fmt.Sprintf(format, args...))
 }
 
+// System discovers conventional font directories, not the OS provider's full
+// registry. Fonts installed elsewhere require an explicit extra directory.
 func System(ctx context.Context, extra []string) (Catalog, error) {
 	var log Catalog
 	dirs, err := fontscan.DefaultFontDirectories(&log)

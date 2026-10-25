@@ -21,6 +21,8 @@ func open(ctx context.Context, parent fyne.Window, request Request, complete fun
 			complete(nil, errors.New("native Windows window handle is unavailable"))
 			return
 		}
+		// The native dialog call blocks; keep it off Fyne's event thread while
+		// retaining the parent HWND and propagating cancellation through zenity.
 		go func() {
 			options := []zenity.Option{zenity.Title(request.Title), zenity.Attach(window.HWND), zenity.Context(ctx)}
 			var paths []string

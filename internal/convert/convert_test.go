@@ -65,6 +65,7 @@ func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 func (w *delayedWriter) Write(p []byte) (int, error) {
 	if !w.delayed {
+		// Cross the 500 ms progress throttle without requiring a large fixture.
 		time.Sleep(550 * time.Millisecond)
 		w.delayed = true
 	}
@@ -187,6 +188,8 @@ func TestSafeOutput(t *testing.T) {
 
 func TestMissingGlyphDiagnostics(t *testing.T) {
 	input := filepath.Join(t.TempDir(), "missing-glyph.srt")
+	// A Unicode noncharacter avoids depending on which ordinary glyphs the
+	// test machine's installed fallback fonts happen to cover.
 	if err := os.WriteFile(input, []byte("1\n00:00:00,000 --> 00:00:01,000\n\U0010ffff"), 0600); err != nil {
 		t.Fatal(err)
 	}

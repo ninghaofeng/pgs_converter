@@ -20,6 +20,8 @@ type module struct {
 	Main               bool
 }
 
+// collect uses the selected target's dependency graph, not all modules in go.mod.
+// Native-library and project-owned asset notices are added by the platform scripts.
 func collect(target, output string) error {
 	cmd := exec.Command("go", "list", "-deps", "-json", target)
 	data, err := cmd.Output()
@@ -58,6 +60,8 @@ func collect(target, output string) error {
 			return fmt.Errorf("missing source directory for %s", name)
 		}
 		count := 0
+		// A module may embed fonts or native sources with nested, independent
+		// notices. Preserve those relative paths, not just the root LICENSE.
 		err := filepath.WalkDir(m.Dir, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err

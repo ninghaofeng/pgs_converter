@@ -6,6 +6,8 @@ import (
 )
 
 // InlineFonts finds font changes and named style resets inside override blocks.
+// styles maps parsed style names to families. Empty/\fn0 resets add no name:
+// the caller's base style and the named resets already account for their families.
 func InlineFonts(text string, styles map[string]string) []string {
 	var names []string
 	for {
@@ -21,6 +23,8 @@ func InlineFonts(text string, styles map[string]string) []string {
 		block := text[:end]
 		text = text[end+1:]
 		depth := 0
+		// Transform closing parentheses are syntax; parentheses in an ordinary
+		// font name are not. Track nesting before trimming a tag's suffix.
 		for _, tag := range strings.Split(block, `\`)[1:] {
 			var name string
 			argument := tag
@@ -47,11 +51,14 @@ func InlineFonts(text string, styles map[string]string) []string {
 	return names
 }
 
+// EmbeddedFont owns decoded attachment bytes; Name is the ASS label, not a family.
 type EmbeddedFont struct {
 	Name string
 	Data []byte
 }
 
+// EmbeddedFonts decodes the legacy ASS/SSA [Fonts] section from normalized text.
+// Malformed attachment lengths become warnings; actual font validation is separate.
 func EmbeddedFonts(text string) ([]EmbeddedFont, []string) {
 	var fonts []EmbeddedFont
 	var warnings []string
@@ -65,6 +72,9 @@ func EmbeddedFonts(text string) ([]EmbeddedFont, []string) {
 		if len(text) == 0 || len(text)%4 == 1 {
 			warnings = append(warnings, fmt.Sprintf("embedded font %q: invalid encoded data length", name))
 		} else {
+			// ASS uses offset-33 six-bit characters, not a Base64 alphabet.
+			// Four characters yield three bytes; final groups may have two or
+			// three characters, but a one-character tail cannot encode a byte.
 			data := make([]byte, 0, len(text)*3/4)
 			for len(text) > 0 {
 				n := min(4, len(text))
@@ -89,6 +99,8 @@ func EmbeddedFonts(text string) ([]EmbeddedFont, []string) {
 	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		line = strings.TrimLeft(line, " \t")
 		header := false
+		// Encoded data can start with '['. Only libass-recognized section
+		// prefixes end an attachment, not every bracketed-looking line.
 		for _, prefix := range []string{"[script info]", "[v4 styles]", "[v4+ styles]", "[events]", "[fonts]"} {
 			header = header || strings.HasPrefix(strings.ToLower(line), prefix)
 		}

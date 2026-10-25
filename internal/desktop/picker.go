@@ -9,6 +9,8 @@ import (
 	"github.com/ninghaofeng/pgs_converter/internal/nativepicker"
 )
 
+// selectPaths permits one native panel at a time and marshals all completion
+// paths onto Fyne's thread before touching controls or accepting selected paths.
 func (w *window) selectPaths(directory bool, accept func([]string)) {
 	if w.pickerCancel != nil {
 		return

@@ -13,6 +13,8 @@ const (
 	chinese = "zh-CN"
 )
 
+// message retains the English lookup key and original arguments so changing the
+// UI language can reformat status text without parsing already-translated strings.
 type message struct {
 	key  string
 	args []any
@@ -21,6 +23,8 @@ type message struct {
 func msg(key string, args ...any) message { return message{key: key, args: args} }
 func (m message) String() string          { return fmt.Sprintf(m.key, m.args...) }
 
+// localizedError exposes an original-language diagnostic to logs while the UI
+// translates its key. Unwrap preserves error identity for cancellation and causes.
 type localizedError struct{ message }
 
 func (e localizedError) Error() string { return e.String() }
@@ -53,6 +57,8 @@ func translate(code, key string, args ...any) string {
 	if code == chinese {
 		value, ok := translations[key]
 		if !ok {
+			// Missing static keys are programmer errors, covered by the AST
+			// translation test, rather than a silent mixed-language fallback.
 			panic("missing desktop translation: " + key)
 		}
 		key = value
@@ -64,6 +70,8 @@ func (w *window) tr(key string, args ...any) string {
 	return translate(w.language, key, args...)
 }
 
+// say registers window-lifetime labels for later retranslation. Short-lived
+// dialogs use local labels instead of retaining their content in this map.
 func (w *window) say(label *widget.Label, key string, args ...any) {
 	if w.messages == nil {
 		w.messages = make(map[*widget.Label]message)
@@ -99,6 +107,8 @@ func (w *window) formItem(key string, field fyne.CanvasObject) *widget.FormItem 
 	return item
 }
 
+// setLanguage updates existing controls and message labels only; raw log entries,
+// conversion snapshots and preview pixels remain unchanged.
 func (w *window) setLanguage(code string) {
 	if code != english && code != chinese {
 		w.showError(uiError("Unsupported UI language: %s", code))

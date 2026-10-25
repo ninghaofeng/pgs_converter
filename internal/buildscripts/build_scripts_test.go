@@ -265,6 +265,8 @@ func TestMacKeepsDefaultPkgConfigPaths(t *testing.T) {
 	}
 	tools := map[string]string{
 		"brew": "#!/bin/sh\ncase \"$1\" in --prefix|--cellar) printf '%s\\n' \"$PGS_TEST_PREFIX\";; *) exit 42;; esac\n",
+		// Exit 43 marks arrival at metadata generation; the fixture must stop
+		// there rather than continue into a real build or package operation.
 		"go": "#!/bin/sh\ncase \"$1\" in\n" +
 			"version) printf 'go version " + runtime.Version() + " darwin/" + runtime.GOARCH + "\\n' ;;\n" +
 			"env) printf '" + runtime.GOARCH + "\\n' ;;\n" +

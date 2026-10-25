@@ -13,6 +13,8 @@ import (
 
 var uiScalePercentages = []int{75, 80, 90, 100, 110, 125, 150}
 
+// scaledTheme changes logical toolkit sizes only. OS/Retina scaling and subtitle
+// pixel dimensions remain independent of the user's interface-size preference.
 type scaledTheme struct {
 	fyne.Theme
 	factor float32
@@ -26,6 +28,8 @@ func (w *window) applyUIScale(percent int) {
 	base := w.app.Settings().Theme()
 	previous, scaled := base.(*scaledTheme)
 	if scaled {
+		// Always scale the underlying theme; wrapping again would compound
+		// every scale change instead of applying the selected percentage.
 		base = previous.Theme
 	}
 	if percent == 100 {

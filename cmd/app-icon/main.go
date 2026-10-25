@@ -1,4 +1,5 @@
-// Command app-icon regenerates application icon assets from the source SVG.
+// Command app-icon regenerates checked-in application icons from the source SVG.
+// Run from the repository root; ordinary platform builds use the generated assets.
 package main
 
 import (
@@ -54,6 +55,8 @@ func icons(source []byte) (map[string][]byte, error) {
 		binary.LittleEndian.PutUint32(entry[12:], uint32(len(ico)))
 		ico = append(ico, images[size]...)
 	}
+	// ICNS lengths include their headers. Retina tags reuse pixel sizes with
+	// different logical point sizes, so their payloads intentionally repeat.
 	icns := []byte("icns\x00\x00\x00\x00")
 	for _, entry := range []struct {
 		tag  string
@@ -86,6 +89,8 @@ func generate() error {
 		}
 	}
 	for _, arch := range []string{"amd64", "arm64"} {
+		// Go's OS/architecture suffix selects only the matching COFF resource
+		// during a Windows build; no resource compiler is needed by end users.
 		target := filepath.Join("cmd", "pgs-converter-gui", "icon_windows_"+arch+".syso")
 		cmd := exec.Command("go", "run", "github.com/akavel/rsrc@v0.10.2", "-arch", arch,
 			"-ico", filepath.Join(assets, "icon.ico"), "-o", target)

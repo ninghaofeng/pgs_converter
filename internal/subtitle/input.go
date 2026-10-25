@@ -240,6 +240,8 @@ func srt(text string, width, height int, style Style, times *[]Interval) (string
 			if err != nil {
 				return 0, err
 			}
+			// The timing regexp has already bounded these two-digit fields
+			// and the three-digit millisecond field; only hours can overflow.
 			minute, _ := strconv.ParseInt(parts[1], 10, 64)
 			second, _ := strconv.ParseInt(parts[2], 10, 64)
 			ms, _ := strconv.ParseInt(parts[3], 10, 64)

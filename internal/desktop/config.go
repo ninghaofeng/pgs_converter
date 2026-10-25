@@ -10,6 +10,8 @@ import (
 	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
 )
 
+// Config stores editable field text, including blank auto-size values, so saving
+// preferences does not replace the user's input with derived engine defaults.
 type Config struct {
 	Size, FPS, Profile, White, Encoding string
 	Font, FontSize, Margin, Fonts       string
@@ -17,11 +19,14 @@ type Config struct {
 	Strict, Overwrite, Recursive        bool
 }
 
+// Defaults supplies first-launch values; language and UI scale have separate preferences.
 func Defaults() Config {
 	return Config{Size: "1920x1080", FPS: "24000/1001", Profile: "sdr", White: "203",
 		Encoding: "auto", Font: "sans-serif", Jobs: "1", Recursive: true}
 }
 
+// Options validates a value snapshot and resolves automatic SRT sizes against the
+// output height. The returned worker count belongs to the batch scheduler.
 func (c Config) Options() (convert.Options, int, error) {
 	var opt convert.Options
 	dimensions := strings.Split(strings.TrimSpace(c.Size), "x")

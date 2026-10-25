@@ -4,6 +4,7 @@
 
 extern void pgs_picker_done(uintptr_t handle, char *result, char *diagnostic);
 
+// Accessed only on AppKit's main queue, including cancellation after completion.
 static NSMutableDictionary<NSNumber *, NSOpenPanel *> *panels;
 
 static void present_panel(NSWindow *window, NSString *prompt, int directory, uintptr_t handle) {
@@ -65,6 +66,7 @@ static void present_panel(NSWindow *window, NSString *prompt, int directory, uin
 
 void pgs_picker_open(uintptr_t parent, const char *title, int directory, uintptr_t handle) {
     @autoreleasepool {
+        // Copy the title before Go frees its temporary C string on return.
         NSString *prompt = [NSString stringWithUTF8String:title];
         NSWindow *window = (NSWindow *)parent;
         // Fyne's native handle callback does not guarantee AppKit's main thread.

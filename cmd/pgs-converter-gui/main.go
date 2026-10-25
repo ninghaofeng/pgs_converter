@@ -30,6 +30,7 @@ func main() {
 	}
 	id := "io.github.ninghaofeng.pgs-converter"
 	if *smoke != "" {
+		// Automated captures must not overwrite the user's normal preferences.
 		id += ".smoke"
 	}
 	a := app.NewWithID(id)

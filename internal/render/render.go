@@ -107,7 +107,10 @@ func (r *Renderer) Diagnostics() []string {
 	return strings.Split(strings.TrimSpace(text), "\n")
 }
 
-// RequiredFonts reads parsed styles/events so ASS and SSA format variants share libass's parser.
+// RequiredFonts returns sorted, case-insensitively deduplicated font references
+// after a successful Load. Parsed styles/events follow libass's Format handling;
+// unused styles and comments are excluded, but each dialogue's base font is
+// included even when an inline override replaces it before visible text.
 func (r *Renderer) RequiredFonts() []string {
 	track := r.ptr.track
 	styles := unsafe.Slice(track.styles, int(track.n_styles))
@@ -158,6 +161,7 @@ func (r *Renderer) Load(text string) ([]Interval, error) {
 	intervals := make([]Interval, len(events))
 	for i, event := range events {
 		start, duration := int64(event.Start), int64(event.Duration)
+		// Keep event bounds within the non-wrapping 32-bit, 90 kHz SUP clock.
 		if start < 0 || duration <= 0 || start > 47721858 || duration > 47721858-start {
 			return nil, fmt.Errorf("event %d: invalid or out-of-range interval", i+1)
 		}

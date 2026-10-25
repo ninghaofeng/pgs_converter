@@ -32,8 +32,11 @@ type Options struct {
 	Encoding      string
 	Fonts         []string
 	Style         subtitle.Style
-	Strict        bool
-	Overwrite     bool
+	// Strict rejects diagnostics, missing ASS/SSA font names and events that
+	// disappear on the sampling grid; it does not guarantee glyph coverage.
+	Strict bool
+	// Overwrite controls File's commit only; Stream never manages a destination.
+	Overwrite bool
 	// Progress runs synchronously on the conversion goroutine. Callers sharing
 	// a callback between conversions must synchronize any shared state.
 	Progress func(Progress)
@@ -127,6 +130,8 @@ func Stream(ctx context.Context, path string, dst io.Writer, opt Options) (Resul
 		}
 		intervals = times
 	}
+	// A nil timing sidecar identifies native ASS/SSA. Generated SRT uses its
+	// selected family and keeps the original millisecond times separately.
 	if times == nil {
 		report, err := checkTrackFonts(ctx, text, r, opt.Fonts)
 		if err != nil {
@@ -235,6 +240,8 @@ func Stream(ctx context.Context, path string, dst io.Writer, opt Options) (Resul
 		if err := check(); err != nil {
 			return result, err
 		}
+		// Suppressing duplicate clears in write also handles intervals whose
+		// rendered content was already transparent at the last sampled frame.
 		if err := write(s.end, nil); err != nil {
 			return result, err
 		}

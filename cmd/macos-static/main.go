@@ -1,5 +1,5 @@
-// macos-static prepares self-contained pkg-config metadata with explicit native
-// archives. Darwin's linker has no supported global third-party-only -static.
+// Command macos-static prepares pkg-config metadata with explicit native archives.
+// Darwin's linker has no supported global third-party-only -static option.
 package main
 
 import (
@@ -13,6 +13,8 @@ import (
 	"unicode"
 )
 
+// splitFlags handles quoted pkg-config arguments without evaluating shell syntax,
+// expanding variables or losing paths containing spaces.
 func splitFlags(text string) ([]string, error) {
 	var result []string
 	var token strings.Builder
@@ -61,6 +63,9 @@ func quoteFlags(flags []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// staticFlags replaces -l names with resolved .a paths, preserving argument order.
+// Only SDK system libraries may remain -l flags; the completed executable is
+// audited separately because resolving inputs does not prove static linkage.
 func staticFlags(flags, extraDirs []string, sdk string) ([]string, []string, error) {
 	dirs := append([]string{}, extraDirs...)
 	for _, value := range flags {
@@ -160,6 +165,8 @@ func configure(pkgConfig, sdk, cellar, extraDir, output string) error {
 		return err
 	}
 	prefixes := map[string]bool{}
+	// Record the actual archive owners rather than every installed formula:
+	// packaging uses these prefixes to find the linked components' notices.
 	for _, archive := range archives {
 		rel, err := filepath.Rel(cellar, archive)
 		if err != nil {

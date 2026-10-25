@@ -10,11 +10,15 @@ import (
 	"github.com/ninghaofeng/pgs_converter/internal/render"
 )
 
+// FontReport separates absent font names from inventory/load diagnostics so the
+// GUI can request fallback consent without treating every scan warning as absence.
+// A clean report does not prove glyph coverage or the provider's exact face choice.
 type FontReport struct {
 	Missing  []string
 	Warnings []string
 }
 
+// Diagnostics returns a new warning list, including one warning per missing name.
 func (report FontReport) Diagnostics() []string {
 	warnings := append([]string(nil), report.Warnings...)
 	for _, name := range report.Missing {
@@ -34,6 +38,8 @@ func checkTrackFonts(ctx context.Context, text string, r *render.Renderer, extra
 		return report, ctx.Err()
 	}
 	embedded, warnings := fontinfo.EmbeddedFonts(text)
+	// Embedded fonts can satisfy the entire track without a system scan.
+	// Match their internal names, not the arbitrary ASS attachment filenames.
 	var embeddedCatalog fontinfo.Catalog
 	for _, font := range embedded {
 		embeddedCatalog.AddEmbedded(font.Name, font.Data)
@@ -63,6 +69,7 @@ func checkTrackFonts(ctx context.Context, text string, r *render.Renderer, extra
 
 // CheckFonts preflights ASS/SSA without rendering frames or creating output.
 // Strict policy is applied by the caller so the GUI can explain missing fonts.
+// Other extensions are a no-op; callers still observe an already-cancelled context.
 func CheckFonts(ctx context.Context, path string, opt Options) (FontReport, error) {
 	var report FontReport
 	ext := strings.ToLower(filepath.Ext(path))

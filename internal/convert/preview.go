@@ -13,6 +13,9 @@ import (
 	"github.com/ninghaofeng/pgs_converter/internal/subtitle"
 )
 
+// readSource shares decoding and SRT escaping between export and preview.
+// A non-nil timing sidecar belongs only to generated SRT and must replace the
+// centisecond times parsed from ASS before the renderer is sampled.
 func readSource(path string, opt Options) (string, []subtitle.Interval, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -36,6 +39,8 @@ func readSource(path string, opt Options) (string, []subtitle.Interval, error) {
 	}
 }
 
+// PreviewResult owns a full-canvas, straight-alpha SDR image, including a
+// transparent canvas when no text is visible. Intervals remain in script order.
 type PreviewResult struct {
 	Image     *image.NRGBA
 	Intervals []subtitle.Interval
@@ -45,6 +50,7 @@ type PreviewResult struct {
 // Preview renders one exact millisecond using export's source preparation and
 // libass. It is an SDR style preview, before SUP quantization and HDR encoding.
 // Each call owns its renderer, so previews cannot race with conversion workers.
+// Missing-font inventory is not run here; Strict only checks render diagnostics.
 func Preview(ctx context.Context, path string, opt Options, ms int64) (PreviewResult, error) {
 	var result PreviewResult
 	if ms < 0 || ms > 47721858 {

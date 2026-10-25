@@ -20,6 +20,8 @@ type missingFonts struct {
 	names []string
 }
 
+// preflightFonts checks the batch snapshot before any output worker starts.
+// Missing names are grouped once for consent; cancellation shares the run context.
 func (w *window) preflightFonts(ctx context.Context, cancel context.CancelFunc, jobs []batch.Job, opt convert.Options, workers int, config Config) {
 	go func() {
 		var missing []missingFonts
@@ -88,7 +90,10 @@ func (w *window) confirmMissingFonts(ctx context.Context, cancel context.CancelF
 	w.say(w.status, "Missing fonts found; waiting for confirmation.")
 	content := widget.NewLabel(w.tr("These required fonts were not found. Continuing allows substitution and may change the subtitle appearance.\n\n%s", details.String()))
 	content.Wrapping = fyne.TextWrapWord
+	// Hide also invokes Fyne's response callback. Guard on the UI thread so
+	// context cancellation and a button response cannot finish/proceed twice.
 	responded := false
+	// Stop watching as soon as a decision is made, not at batch completion.
 	closed := make(chan struct{})
 	d := dialog.NewCustomConfirm(w.tr("Missing subtitle fonts"), w.tr("Continue with font fallback"), w.tr("Cancel conversion"),
 		container.NewVScroll(content), func(ok bool) {

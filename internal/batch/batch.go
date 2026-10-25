@@ -14,11 +14,15 @@ import (
 	"github.com/ninghaofeng/pgs_converter/internal/convert"
 )
 
+// Job retains discovery failures alongside valid inputs so each input can be
+// reported in the queue or CLI summary without attempting an invalid conversion.
 type Job struct {
 	Input, Output string
 	Err           error
 }
 
+// Event identifies a job by its index in the original snapshot, not completion
+// order. Started and Progress are intermediate; neither set means completion.
 type Event struct {
 	Job
 	Index    int
@@ -27,6 +31,7 @@ type Event struct {
 	Result   convert.Result
 }
 
+// Supported checks the filename extension only; parsing happens during conversion.
 func Supported(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".srt", ".ass", ".ssa":
@@ -36,7 +41,8 @@ func Supported(path string) bool {
 }
 
 // Discover preserves directory-relative paths and rejects every participant in
-// an output collision. Directory symlinks are not traversed.
+// an output collision. Directory symlinks encountered during a walk are not
+// traversed. Destination matching is case-insensitive on every platform.
 func Discover(inputs []string, output string, recursive bool) []Job {
 	var jobs []Job
 	for _, input := range inputs {
@@ -113,6 +119,8 @@ func Run(ctx context.Context, jobs []Job, opt convert.Options, workers int, prog
 	jobs = append([]Job(nil), jobs...)
 	opt.Fonts = append([]string(nil), opt.Fonts...)
 	tasks := make(chan int)
+	// Backpressure bounds queued progress. Receivers must keep draining while
+	// cancelling, or workers cannot deliver their final results and terminate.
 	results := make(chan Event)
 	var wg sync.WaitGroup
 	for i := 0; i < min(workers, len(jobs)); i++ {

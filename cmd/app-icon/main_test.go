@@ -34,6 +34,8 @@ func TestGeneratedIcons(t *testing.T) {
 	if im.Bounds().Dx() != 512 || im.Bounds().Dy() != 512 {
 		t.Fatal("wrong application icon dimensions")
 	}
+	// A valid PNG can still contain only the background if a transform collapses
+	// the glyph. Check visible content rather than format and dimensions alone.
 	white := 0
 	for y := 0; y < 512; y++ {
 		for x := 0; x < 512; x++ {
@@ -101,6 +103,8 @@ func TestWindowsResourcesLinkForBothArchitectures(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := filepath.Join(dir, "icon.exe")
+			// A minimal pure-Go executable tests real COFF linking on either
+			// architecture without requiring Windows Fyne/cgo graphics libraries.
 			cmd := exec.Command("go", "build", "-o", output, ".")
 			cmd.Dir = dir
 			cmd.Env = append(os.Environ(), "GO111MODULE=off", "GOOS=windows", "GOARCH="+target.arch, "CGO_ENABLED=0")

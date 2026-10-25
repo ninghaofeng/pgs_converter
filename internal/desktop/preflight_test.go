@@ -109,6 +109,7 @@ func TestMissingFontPromptCancelsWithWindow(t *testing.T) {
 	w.build(Defaults())
 	w.rows = []row{{job: batch.Job{Input: "missing.ass"}, state: msg("Waiting")}}
 	w.active, w.closing = true, true
+	// Wait for finish's close notification before reading callback-owned state.
 	closed := make(chan struct{})
 	w.win.SetOnClosed(func() { close(closed) })
 	ctx, cancel := context.WithCancel(context.Background())

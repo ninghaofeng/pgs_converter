@@ -14,6 +14,8 @@ func (w *window) showAbout() {
 	icon.FillMode = canvas.ImageFillContain
 	notices := widget.NewLabel(w.tr("Third-party components retain their own copyrights and licenses. See THIRD_PARTY_NOTICES and the licenses folder in the application package."))
 	notices.Wrapping = fyne.TextWrapWord
+	// Modal text uses the current language on open; do not register these
+	// transient labels in the window's persistent translation map.
 	content := container.NewVBox(
 		container.NewCenter(icon),
 		widget.NewLabelWithStyle("PGS Converter", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),

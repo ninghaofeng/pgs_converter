@@ -98,6 +98,7 @@ func (w *window) chooseFont() {
 			found, warnings, err = scanFontFamilies(ctx, dirs, extra)
 		}
 		fyne.Do(func() {
+			// The dialog may have closed while metadata was being parsed.
 			if ctx.Err() != nil {
 				return
 			}
@@ -116,6 +117,8 @@ func (w *window) chooseFont() {
 	}()
 }
 
+// scheduleStylePreview debounces only SRT typography edits. Generation checks
+// suppress timers already firing when Stop or native-render cancellation loses a race.
 func (w *window) scheduleStylePreview() {
 	if w.styleTimer != nil {
 		w.styleTimer.Stop()

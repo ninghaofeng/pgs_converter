@@ -100,6 +100,8 @@ func TestDesktopConversionEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.files = []string{input}
+	// Closing is the synchronization point for the final UI callback; polling
+	// mutable rows from the test goroutine would race with test-driver fyne.Do.
 	closed := make(chan struct{})
 	w.win.SetOnClosed(func() { close(closed) })
 	w.closing = true
