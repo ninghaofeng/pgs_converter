@@ -32,6 +32,13 @@ generated `PGS-Converter.app`; on Windows, open `pgs-converter-gui.exe`.
 The macOS bundle is ad-hoc signed for development, not Developer ID signed or
 notarized. Public distribution still requires platform signing/release checks.
 
+The desktop icon uses Google's Apache-2.0 Material **Subtitles** glyph on a
+blue/teal background. It is embedded in the window, Windows executable and
+macOS application bundle. The source is `internal/desktop/assets/icon.svg`;
+after editing it, run `go run ./cmd/app-icon` from the repository root to
+regenerate PNG/ICO/ICNS and both Windows architecture resources. Generated
+assets are checked in, so ordinary builds need no icon-generation tools.
+
 The interface supports **English and Simplified Chinese**. On first launch,
 Chinese system locales select Simplified Chinese; other locales select English.
 Use **Language / 界面语言** at the top of the settings panel to switch immediately

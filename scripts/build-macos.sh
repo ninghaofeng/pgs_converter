@@ -261,7 +261,10 @@ if "$build_gui"; then
         -o "$gui_binary" ./cmd/pgs-converter-gui
     audit_macos "$gui_binary" > "$destination/GUI-MACHO-IMPORTS.txt"
     go run ./cmd/package-licenses -output "$destination/licenses/go-modules"
+    mkdir -p "$destination/licenses/material-icons"
+    cp internal/desktop/assets/LICENSE-material-icons "$destination/licenses/material-icons/LICENSE"
     cp -R "$destination/licenses" "$app/Contents/Resources/"
+    cp internal/desktop/assets/icon.icns "$app/Contents/Resources/Icon.icns"
     cp README.md README.zh-CN.md THIRD_PARTY_NOTICES "$app/Contents/Resources/"
     cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -270,6 +273,7 @@ if "$build_gui"; then
 <key>CFBundleExecutable</key><string>pgs-converter-gui</string>
 <key>CFBundleIdentifier</key><string>io.github.ninghaofeng.pgs-converter</string>
 <key>CFBundleName</key><string>PGS Converter</string>
+<key>CFBundleIconFile</key><string>Icon.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>CFBundleVersion</key><string>1</string>

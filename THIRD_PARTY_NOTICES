@@ -8,6 +8,15 @@ be audited before public redistribution. No subtitle font files are bundled.
 The optional Fyne GUI embeds toolkit UI fonts, with their upstream notices
 collected under licenses/go-modules along with its transitive Go dependencies.
 
+Application icon:
+
+* Google Material Icons, "subtitles": Apache-2.0
+  https://github.com/google/material-design-icons
+  Original: src/av/subtitles/materialicons/24px.svg
+  Modified with a white glyph, blue/teal background and application-icon layout.
+  Full license: licenses/material-icons/LICENSE in desktop packages.
+  Source license: internal/desktop/assets/LICENSE-material-icons.
+
 Direct Go dependencies (versions are recorded in go.mod and go.sum):
 
 * github.com/go-text/typesetting: Unlicense OR BSD-3-Clause; font metadata scanning

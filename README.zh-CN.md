@@ -32,6 +32,14 @@ Windows 打开 `pgs-converter-gui.exe`。
 macOS 目前仅使用开发用临时签名，不是 Developer ID 签名或公证，
 公开分发前仍需完成平台签名和发布检查。
 
+桌面图标使用 Google Material Icons 的 **Subtitles（字幕）** 图形，
+配以蓝青色背景，采用 Apache-2.0 许可证，已嵌入窗口、
+Windows 可执行文件和 macOS 应用包。
+源文件为 `internal/desktop/assets/icon.svg`；
+修改后在项目根目录运行 `go run ./cmd/app-icon`，
+即可重新生成 PNG／ICO／ICNS 和两个 Windows 架构的图标资源。
+生成文件随源码保存，普通构建不需要额外的图标生成工具。
+
 界面支持 **简体中文和 English**。首次启动时，中文系统默认使用简体中文，
 其他系统默认使用英文。在右侧设置面板顶部的 **界面语言 / Language**
 中可即时切换，无需重启，不会清空队列、中断转换或重置预览。

@@ -75,7 +75,9 @@ type window struct {
 }
 
 func New(a fyne.App, version string, inputs ...string) fyne.Window {
+	a.SetIcon(applicationIcon)
 	w := &window{app: a, win: a.NewWindow("PGS Converter"), selected: -1, previewGate: make(chan struct{}, 1)}
+	w.win.SetIcon(applicationIcon)
 	var languageErr error
 	w.language, languageErr = initialLanguage(a.Preferences().String("desktop-language"), lang.SystemLocale().String())
 	w.uiScale = a.Preferences().IntWithFallback("desktop-ui-scale", 100)

@@ -104,6 +104,8 @@ function New-WindowsBundle {
         Copy-Item -LiteralPath $GuiBinary -Destination "$Destination/pgs-converter-gui.exe"
         $guiImports | Set-Content -LiteralPath "$Destination/GUI-PE-IMPORTS.txt" -Encoding Ascii
         Invoke-CheckedNative "go" @("run", "./cmd/package-licenses", "-output", "$Destination/licenses/go-modules")
+        New-Item -ItemType Directory -Force -Path "$Destination/licenses/material-icons" | Out-Null
+        Copy-Item -LiteralPath "internal/desktop/assets/LICENSE-material-icons" -Destination "$Destination/licenses/material-icons/LICENSE"
         Invoke-CheckedNative "$Destination/pgs-converter-gui.exe" @("-version")
     }
     Copy-Item README.md, README.zh-CN.md, THIRD_PARTY_NOTICES $Destination
