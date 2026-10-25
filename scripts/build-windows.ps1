@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-Build, test and package the native Windows CLI without mandatory path arguments.
+Build, test and package the native Windows CLI and desktop app without mandatory path arguments.
 .DESCRIPTION
-By default, only checks for dependencies. -InstallDependencies permits winget
+Both CLI and desktop app are built by default. Dependency installation is opt-in.
+-InstallDependencies permits winget
 to install Go/MSYS2 and pacman to install the matching native C toolchain/libass.
 Installers may request elevation. Existing packages are never deleted.
 Only static native linking is supported; non-system DLL imports are rejected.
@@ -23,7 +24,7 @@ param(
     [switch]$InstallDependencies,
     [string]$Msys2Root,
     [switch]$Static, # Compatibility alias: static is now the only build mode.
-    [switch]$Gui
+    [switch]$Gui = $true # Compatibility option: GUI is now built by default.
 )
 
 Set-StrictMode -Version Latest
@@ -356,6 +357,9 @@ function Invoke-WindowsBuild {
         $hash = (Get-FileHash -LiteralPath "$destination.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
         "$hash  $packageName.zip" | Set-Content -LiteralPath "$destination.zip.sha256" -Encoding Ascii
         Write-Host "`nBuild succeeded.`nExecutable: $destination/pgs-converter.exe`nArchive: $destination.zip`nChecksum: $destination.zip.sha256"
+        if ($WithGui) {
+            Write-Host "Desktop app: $destination/pgs-converter-gui.exe"
+        }
     } finally {
         foreach ($name in $names) { [System.Environment]::SetEnvironmentVariable($name, $saved[$name], "Process") }
         Pop-Location

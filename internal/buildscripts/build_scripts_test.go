@@ -154,6 +154,17 @@ func TestMacBuildArguments(t *testing.T) {
 	}
 }
 
+func TestMacBuildIncludesDesktopByDefault(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS build defaults")
+	}
+	cmd := exec.Command("/bin/bash", "-c", `source "$1"; [[ "$build_gui" == true ]]`,
+		"build-defaults-test", scriptPath(t, "build-macos.sh"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("macOS must build the desktop app by default: %v: %s", err, output)
+	}
+}
+
 func TestMacDependencyInstallationIsOptIn(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS dependency preflight")

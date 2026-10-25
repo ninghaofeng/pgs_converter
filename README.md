@@ -13,19 +13,21 @@ It does not encode video, perform OCR, or mux MKV files.
 
 An optional Fyne 2.8 desktop app shares the CLI's conversion engine and batch
 scheduler. It uses Go widgets, not a WebView; Node.js, a browser and WebView2
-are not required. CLI commands and default CLI-only packaging are unchanged.
+are not required. Both platform build scripts package the CLI and desktop app
+by default; CLI commands are unchanged.
 
 ```sh
 # macOS: package the CLI and PGS-Converter.app together
-bash scripts/build-macos.sh --gui
+bash scripts/build-macos.sh
 ```
 
 ```powershell
 # Windows: package the CLI and pgs-converter-gui.exe together
-.\scripts\build-windows.cmd -Gui
+.\scripts\build-windows.cmd
 ```
 
-Add the existing dependency-install option if needed. On macOS, open the
+The previous `--gui` (macOS) and `-Gui` (Windows) options remain compatible but
+are no longer required. Add the existing dependency-install option if needed. On macOS, open the
 generated `PGS-Converter.app`; on Windows, open `pgs-converter-gui.exe`.
 The macOS bundle is ad-hoc signed for development, not Developer ID signed or
 notarized. Public distribution still requires platform signing/release checks.

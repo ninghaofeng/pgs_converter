@@ -13,18 +13,19 @@
 
 可选的 Fyne 2.8 桌面应用复用 CLI 转换引擎和批处理调度器，
 使用 Go 界面组件，不使用 WebView，不需要 Node.js、浏览器或 WebView2。
-已有 CLI 命令及默认仅打包 CLI 的行为不变。
+两个平台的构建脚本现在默认同时打包 CLI 和桌面应用，已有 CLI 命令不变。
 
 ```sh
 # macOS：同时打包 CLI 和桌面应用
-bash scripts/build-macos.sh --gui
+bash scripts/build-macos.sh
 ```
 
 ```powershell
 # Windows：同时打包 CLI 和桌面应用
-.\scripts\build-windows.cmd -Gui
+.\scripts\build-windows.cmd
 ```
 
+原有 `--gui`（macOS）和 `-Gui`（Windows）参数仍然兼容，但不再需要。
 缺少依赖时可叠加原有的显式安装选项。
 macOS 打开生成包中的 `PGS-Converter.app`；
 Windows 打开 `pgs-converter-gui.exe`。

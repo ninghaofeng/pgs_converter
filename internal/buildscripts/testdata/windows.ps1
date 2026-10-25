@@ -23,6 +23,7 @@ foreach ($path in @("$scripts/build-windows.ps1", $PSCommandPath)) {
 }
 
 . "$scripts/build-windows.ps1"
+Assert ([bool]$Gui) "Windows builds must include the desktop app by default."
 $pkgConfigPath = "C:\MSYS2 with spaces\ucrt64\bin\pkg-config.exe"
 $staticLink = Get-WindowsLinkConfiguration $pkgConfigPath -CxxLinker "g++.exe"
 Assert ($staticLink.PkgConfig -eq '"C:/MSYS2 with spaces/ucrt64/bin/pkg-config.exe"') "PKG_CONFIG must be a quoted executable without discarded arguments."

@@ -6,17 +6,17 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 install_dependencies=false
-build_gui=false
+build_gui=true
 
 usage() {
     cat <<'USAGE'
 Usage: bash scripts/build-macos.sh [--install-dependencies] [--gui]
 
 Check dependencies, statically link third-party libraries, run tests and vet,
-and create a single-executable package under dist/. No paths are required.
+and package both the CLI and PGS-Converter.app under dist/. No paths are required.
 
   --install-dependencies  Allow missing tools/libraries and private source builds.
-  --gui                  Also build and package the Fyne desktop app.
+  --gui                  Compatibility option; the desktop app is built by default.
   -h, --help             Show this help without changing the environment.
 
 Homebrew must already be installed (https://brew.sh). If Apple command-line
